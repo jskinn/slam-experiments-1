@@ -4,6 +4,7 @@ import os
 import bson
 import logging
 import numpy as np
+import json
 import arvet.util.database_helpers as dh
 import arvet.util.dict_utils as du
 import arvet.util.transform as tf
@@ -357,6 +358,52 @@ class SimpleMotionExperiment(arvet.batch_analysis.experiment.Experiment):
                 pyplot.tight_layout()
                 pyplot.subplots_adjust(top=0.95, right=0.99)
         pyplot.show()
+
+    def export_data(self, db_client: arvet.database.client.DatabaseClient):
+        simulator_names = {v: k for k, v in self._simulators.items()}
+        systems = du.defaults({'LIBVISO 2': self._libviso_system}, self._orbslam_systems)
+
+        for trajectory_group in self._trajectory_groups.values():
+
+            # Collect all the image sources for this trajectory group
+            image_sources = {}
+            for simulator_id, dataset_id in trajectory_group.generated_datasets.items():
+                if simulator_id in simulator_names:
+                    image_sources[simulator_names[simulator_id]] = dataset_id
+                else:
+                    image_sources[simulator_id] = dataset_id
+
+            # Collect the trial results for each image source in this group
+            trial_results = {}
+            for system_name, system_id in systems.items():
+                for dataset_name, dataset_id in image_sources.items():
+                    trial_result_id = self.get_trial_result(system_id, dataset_id)
+                    if trial_result_id is not None:
+                        label = "{0} on {1}".format(system_name, dataset_name)
+                        trial_results[label] = trial_result_id
+
+            # Make sure we have at least one result to plot
+            if len(trial_results) >= 1:
+                json_data = {}
+                added_ground_truth = False
+
+                # For each trial result
+                for label, trial_result_id in trial_results.items():
+                    trial_result = dh.load_object(db_client, db_client.trials_collection, trial_result_id)
+                    if trial_result is not None:
+                        if trial_result.success:
+                            if not added_ground_truth:
+                                added_ground_truth = True
+                                trajectory = trial_result.get_ground_truth_camera_poses()
+                                json_data['ground_truth'] = [[time] + list(pose.location)
+                                                             for time, pose in trajectory.items()]
+                            trajectory = trial_result.get_computed_camera_poses()
+                            json_data[label] = [[time] + list(pose.location)
+                                                for time, pose in trajectory.items()]
+
+                with open('{0}.json'.format(trajectory_group.name), 'w') as json_file:
+                    json.dump(json_data, json_file)
+
 
     def serialize(self):
         serialized = super().serialize()

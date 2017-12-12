@@ -245,20 +245,21 @@ class RealWorldExperiment(arvet.batch_analysis.experiment.Experiment):
         :param db_client:
         :return:
         """
-        for dataset_name, dataset_id in self._datasets.items():
-            trajectory = traj_help.get_trajectory_for_image_source(db_client, dataset_id)
-            with open('trajectory_{0}.csv'.format(dataset_name), 'w') as output_file:
-                output_file.write('Name,X,Y,Z,Roll,Pitch,Yaw\n')
-                for idx, timestamp in enumerate(sorted(trajectory.keys())):
-                    ue_pose = uetf.transform_to_unreal(trajectory[timestamp])
-                    output_file.write('{name},{x},{y},{z},{roll},{pitch},{yaw}\n'.format(
-                        name=idx,
-                        x=ue_pose.location[0],
-                        y=ue_pose.location[1],
-                        z=ue_pose.location[2],
-                        roll=ue_pose.euler[0],
-                        pitch=ue_pose.euler[1],
-                        yaw=ue_pose.euler[2]))
+        pass
+        #for dataset_name, dataset_id in self._datasets.items():
+        #    trajectory = traj_help.get_trajectory_for_image_source(db_client, dataset_id)
+        #    with open('trajectory_{0}.csv'.format(dataset_name), 'w') as output_file:
+        #        output_file.write('Name,X,Y,Z,Roll,Pitch,Yaw\n')
+        #        for idx, timestamp in enumerate(sorted(trajectory.keys())):
+        #            ue_pose = uetf.transform_to_unreal(trajectory[timestamp])
+        #            output_file.write('{name},{x},{y},{z},{roll},{pitch},{yaw}\n'.format(
+        #                name=idx,
+        #                x=ue_pose.location[0],
+        #                y=ue_pose.location[1],
+        #                z=ue_pose.location[2],
+        #                roll=ue_pose.euler[0],
+        #                pitch=ue_pose.euler[1],
+        #                yaw=ue_pose.euler[2]))
 
     def serialize(self):
         serialized = super().serialize()
