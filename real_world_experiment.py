@@ -1,10 +1,11 @@
 # Copyright (c) 2017, John Skinner
+import typing
 import os
 import logging
+import json
 import arvet.util.database_helpers as dh
 import arvet.util.dict_utils as du
-import arvet.util.trajectory_helpers as traj_help
-import arvet.util.unreal_transform as uetf
+import arvet.util.transform as tf
 import arvet.database.client
 import arvet.config.path_manager
 import arvet.batch_analysis.experiment
@@ -188,7 +189,7 @@ class RealWorldExperiment(arvet.batch_analysis.experiment.Experiment):
         # Map system ids and simulator ids to printable names
         systems = du.defaults({'LIBVISO 2': self._libviso_system}, self._orbslam_systems)
 
-        for dataset_name, dataset_id in self._datasets.values():
+        for dataset_name, dataset_id in self._datasets.items():
             # Collect the trial results for this dataset
             trial_results = {}
             style = {}
@@ -245,21 +246,40 @@ class RealWorldExperiment(arvet.batch_analysis.experiment.Experiment):
         :param db_client:
         :return:
         """
-        pass
-        #for dataset_name, dataset_id in self._datasets.items():
-        #    trajectory = traj_help.get_trajectory_for_image_source(db_client, dataset_id)
-        #    with open('trajectory_{0}.csv'.format(dataset_name), 'w') as output_file:
-        #        output_file.write('Name,X,Y,Z,Roll,Pitch,Yaw\n')
-        #        for idx, timestamp in enumerate(sorted(trajectory.keys())):
-        #            ue_pose = uetf.transform_to_unreal(trajectory[timestamp])
-        #            output_file.write('{name},{x},{y},{z},{roll},{pitch},{yaw}\n'.format(
-        #                name=idx,
-        #                x=ue_pose.location[0],
-        #                y=ue_pose.location[1],
-        #                z=ue_pose.location[2],
-        #                roll=ue_pose.euler[0],
-        #                pitch=ue_pose.euler[1],
-        #                yaw=ue_pose.euler[2]))
+        systems = du.defaults({'LIBVISO 2': self._libviso_system}, self._orbslam_systems)
+
+        for dataset_name, dataset_id in self._datasets.items():
+            # Collect the trial results for each image source in this group
+            trial_results = {}
+            for system_name, system_id in systems.items():
+                trial_result_id = self.get_trial_result(system_id, dataset_id)
+                if trial_result_id is not None:
+                    label = "{0} on {1}".format(system_name, dataset_name)
+                    trial_results[label] = trial_result_id
+
+            # Make sure we have at least one result to plot
+            if len(trial_results) >= 1:
+                json_data = {}
+                added_ground_truth = False
+
+                # For each trial result
+                for label, trial_result_id in trial_results.items():
+                    trial_result = dh.load_object(db_client, db_client.trials_collection, trial_result_id)
+                    if trial_result is not None:
+                        if trial_result.success:
+                            if not added_ground_truth:
+                                added_ground_truth = True
+                                trajectory = trial_result.get_ground_truth_camera_poses()
+                                first_pose = trajectory[min(trajectory.keys())]
+                                json_data['ground_truth'] = [[time] + location_to_json(first_pose.find_relative(pose))
+                                                             for time, pose in trajectory.items()]
+                            trajectory = trial_result.get_computed_camera_poses()
+                            first_pose = trajectory[min(trajectory.keys())]
+                            json_data[label] = [[time] + location_to_json(first_pose.find_relative(pose))
+                                                for time, pose in trajectory.items()]
+
+                with open('{0}.json'.format(dataset_name), 'w') as json_file:
+                    json.dump(json_data, json_file)
 
     def serialize(self):
         serialized = super().serialize()
@@ -341,6 +361,19 @@ def plot_trajectory(axis, trajectory, label, style='-'):
             z.append(pose.location[2])
     axis.plot(x, y, z, style, label=label, alpha=0.7)
     return min_point, max_point
+
+
+def location_to_json(pose: tf.Transform) -> typing.List[float]:
+    """
+    A simple helper to pull location from a transform and return it
+    :param pose: A Transform object
+    :return: The list of coordinates of it's location
+    """
+    return [
+        pose.location[0],
+        pose.location[1],
+        pose.location[2]
+    ]
 
 
 def update_schema(serialized: dict, db_client: arvet.database.client.DatabaseClient):
