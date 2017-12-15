@@ -550,7 +550,32 @@ def location_to_json(pose: tf.Transform) -> typing.List[float]:
 
 def update_schema(serialized: dict, db_client: arvet.database.client.DatabaseClient):
     # version = dh.get_schema_version(serialized, 'experiments:visual_slam:SimpleMotionExperiment')
-    pass
+
+    # Clean out invalid ids from the serialized object
+    if 'libviso' in serialized and not dh.check_reference_is_valid(db_client.system_collection, serialized['libviso']):
+        del serialized['libviso']
+    if 'orbslam_systems' in serialized:
+        keys = list(serialized['orbslam_systems'].keys())
+        for key in keys:
+            if not dh.check_reference_is_valid(db_client.system_collection, serialized['orbslam_systems'][key]):
+                del serialized['orbslam_systems'][key]
+    if 'simulators' in serialized:
+        keys = list(serialized['simulators'].keys())
+        for key in keys:
+            if not dh.check_reference_is_valid(db_client.image_source_collection, serialized['simulators'][key]):
+                del serialized['simulators'][key]
+    if 'benchmark_rpe' in serialized and \
+            not dh.check_reference_is_valid(db_client.system_collection, serialized['benchmark_rpe']):
+        del serialized['benchmark_rpe']
+    if 'benchmark_ate' in serialized and \
+            not dh.check_reference_is_valid(db_client.system_collection, serialized['benchmark_ate']):
+        del serialized['benchmark_ate']
+    if 'benchmark_trajectory_drift' in serialized and \
+            not dh.check_reference_is_valid(db_client.system_collection, serialized['benchmark_trajectory_drift']):
+        del serialized['benchmark_trajectory_drift']
+    if 'benchmark_tracking' in serialized and \
+            not dh.check_reference_is_valid(db_client.system_collection, serialized['benchmark_tracking']):
+        del serialized['benchmark_tracking']
 
 
 def get_forwards_trajectory() -> typing.Mapping[float, tf.Transform]:
