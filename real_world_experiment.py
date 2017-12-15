@@ -12,6 +12,7 @@ import arvet.batch_analysis.experiment
 import arvet.batch_analysis.task_manager
 import arvet_slam.systems.visual_odometry.libviso2.libviso2 as libviso2
 import arvet_slam.systems.slam.orbslam2 as orbslam2
+import arvet_slam.dataset.tum.tum_manager
 import arvet_slam.benchmarks.rpe.relative_pose_error as rpe
 import arvet_slam.benchmarks.ate.absolute_trajectory_error as ate
 import arvet_slam.benchmarks.trajectory_drift.trajectory_drift as traj_drift
@@ -81,6 +82,45 @@ class RealWorldExperiment(arvet.batch_analysis.experiment.Experiment):
                     self._set_property('datasets.{0}'.format(name), task.result)
                 else:
                     task_manager.do_task(task)
+
+            # Import EuRoC datasets
+            for name, path in [
+                ('EuRoC MH_01_easy', path_manager.find_dir(os.path.join('datasets', 'EuRoC', 'MH_01_easy'))),
+                ('EuRoC MH_02_easy', path_manager.find_dir(os.path.join('datasets', 'EuRoC', 'MH_02_easy'))),
+                ('EuRoC MH_02_medium', path_manager.find_dir(os.path.join('datasets', 'EuRoC', 'MH_03_medium'))),
+                ('EuRoC MH_04_difficult', path_manager.find_dir(os.path.join('datasets', 'EuRoC', 'MH_04_difficult'))),
+                ('EuRoC MH_05_difficult', path_manager.find_dir(os.path.join('datasets', 'EuRoC', 'MH_05_difficult'))),
+                ('EuRoC V1_01_easy', path_manager.find_dir(os.path.join('datasets', 'EuRoC', 'V1_01_easy'))),
+                ('EuRoC V1_02_medium', path_manager.find_dir(os.path.join('datasets', 'EuRoC', 'V1_02_medium'))),
+                ('EuRoC V1_03_difficult', path_manager.find_dir(os.path.join('datasets', 'EuRoC', 'V1_03_difficult'))),
+                ('EuRoC V2_01_easy', path_manager.find_dir(os.path.join('datasets', 'EuRoC', 'V2_01_easy'))),
+                ('EuRoC V2_02_medium', path_manager.find_dir(os.path.join('datasets', 'EuRoC', 'V2_02_medium'))),
+                ('EuRoC V2_03_difficult', path_manager.find_dir(os.path.join('datasets', 'EuRoC', 'V2_03_difficult')))
+            ]:
+                if os.path.isdir(path):
+                    task = task_manager.get_import_dataset_task(
+                        module_name='arvet_slam.dataset.euroc.euroc_loader',
+                        path=path,
+                        num_cpus=1,
+                        num_gpus=0,
+                        memory_requirements='3GB',
+                        expected_duration='4:00:00'
+                    )
+                    if task.is_finished:
+                        self._datasets[name] = task.result
+                        self._set_property('datasets.{0}'.format(name), task.result)
+                    else:
+                        task_manager.do_task(task)
+
+            # Import TUM datasets using the manager. Load all the TUM datasets we can
+            tum_manager = arvet_slam.dataset.tum.tum_manager.TUMManager(
+                {name: True for name in arvet_slam.dataset.tum.tum_manager.dataset_names})
+            tum_manager.do_imports(os.path.expanduser(os.path.join('~', 'datasets', 'TUM')), task_manager)
+            for name, dataset_id in tum_manager.datasets:
+                extended_name = 'TUM ' + name
+                if extended_name not in self._datasets or self._datasets[extended_name] != dataset_id:
+                    self._datasets[extended_name] = dataset_id
+                    self._set_property('datasets.{0}'.format(extended_name), dataset_id)
 
         # --------- SYSTEMS -----------
         if self._libviso_system is None:
