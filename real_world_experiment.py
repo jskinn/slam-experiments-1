@@ -319,13 +319,17 @@ class RealWorldExperiment(arvet.batch_analysis.experiment.Experiment):
                             if not added_ground_truth:
                                 added_ground_truth = True
                                 trajectory = trial_result.get_ground_truth_camera_poses()
-                                first_pose = trajectory[min(trajectory.keys())]
-                                json_data['ground_truth'] = [[time] + location_to_json(first_pose.find_relative(pose))
-                                                             for time, pose in trajectory.items()]
+                                if len(trajectory) > 0:
+                                    first_pose = trajectory[min(trajectory.keys())]
+                                    json_data['ground_truth'] = [
+                                        [time] + location_to_json(first_pose.find_relative(pose))
+                                        for time, pose in trajectory.items()
+                                    ]
                             trajectory = trial_result.get_computed_camera_poses()
-                            first_pose = trajectory[min(trajectory.keys())]
-                            json_data[label] = [[time] + location_to_json(first_pose.find_relative(pose))
-                                                for time, pose in trajectory.items()]
+                            if len(trajectory) > 0:
+                                first_pose = trajectory[min(trajectory.keys())]
+                                json_data[label] = [[time] + location_to_json(first_pose.find_relative(pose))
+                                                    for time, pose in trajectory.items()]
 
                 with open('{0}.json'.format(dataset_name), 'w') as json_file:
                     json.dump(json_data, json_file)
