@@ -103,3 +103,7 @@ jrs_auto_task*
 
 # Profile statistics
 *.stats
+
+# Data dump output
+*.json
+
