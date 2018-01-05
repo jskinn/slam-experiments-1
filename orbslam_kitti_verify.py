@@ -141,8 +141,7 @@ class OrbslamKITTIVerify(arvet.batch_analysis.experiment.Experiment):
         # All image datasets
         datasets = list(self._datasets.values())
         # All benchmarks
-        benchmarks = [self._benchmark_rpe, self._benchmark_ate,
-                      self._benchmark_trajectory_drift, self._benchmark_tracking]
+        benchmarks = [self._benchmark_rpe]
 
         # Schedule all combinations of systems with the generated datasets
         self.schedule_all(task_manager=task_manager,
