@@ -4,6 +4,7 @@ import os
 import numpy as np
 import arvet.util.database_helpers as dh
 import arvet.util.transform as tf
+import arvet.util.associate as ass
 import arvet.database.client
 import arvet.config.path_manager
 import arvet.batch_analysis.experiment
@@ -230,16 +231,16 @@ def plot_difference(computed_trajectory: typing.Mapping[float, tf.Transform], re
 
     reference_trajectory = load_ref_trajectory(reference_filename)
 
-    comp_stamps = set(computed_trajectory.keys())
-    reference_stamps = set(reference_trajectory.keys())
-    missing_ref = reference_stamps - comp_stamps
+    matches = ass.associate(reference_trajectory, computed_trajectory, offset=0, max_difference=0.000001)
+
+    missing_ref = set(reference_trajectory.keys()) - {m[0] for m in matches}
     if len(missing_ref) > 0:
         print("missing reference stamps: {0}".format(missing_ref))
-    extra_stamps = comp_stamps - reference_stamps
+    extra_stamps = set(computed_trajectory.keys()) - {m[1] for m in matches}
     if len(extra_stamps) > 0:
         print("extra computed stamps: {0}".format(extra_stamps))
 
-    times = sorted(comp_stamps & reference_stamps)
+    times = []
     x = []
     y = []
     z = []
@@ -247,10 +248,11 @@ def plot_difference(computed_trajectory: typing.Mapping[float, tf.Transform], re
     qy = []
     qz = []
     qw = []
-    for stamp in times:
-        comp_pose = computed_trajectory[stamp]
-        ref_pose = reference_trajectory[stamp]
+    for ref_stamp, comp_stamp in matches:
+        ref_pose = reference_trajectory[ref_stamp]
+        comp_pose = computed_trajectory[comp_stamp]
         diff = comp_pose.location - ref_pose.location
+        times.append(ref_stamp)
         x.append(abs(diff[0]))
         y.append(abs(diff[1]))
         z.append(abs(diff[2]))
@@ -271,6 +273,7 @@ def plot_difference(computed_trajectory: typing.Mapping[float, tf.Transform], re
     ax.plot(times, qx, label='qx')
     ax.plot(times, qy, label='qy')
     ax.plot(times, qz, label='qz')
+    ax.legend()
     pyplot.show()
 
 
@@ -286,11 +289,11 @@ def load_ref_trajectory(filename: str) -> typing.Mapping[float, tf.Transform]:
             if len(parts) >= 13:
                 stamp, r00, r01, r02, t0, r10, r11, r12, t1, r20, r21, r22, t2 = parts[0:13]
                 pose = np.matrix([
-                    [r00, r01, r02, t0],
-                    [r10, r11, r12, t1],
-                    [r20, r21, r22, t2],
+                    [float(r00), float(r01), float(r02), float(t0)],
+                    [float(r10), float(r11), float(r12), float(t1)],
+                    [float(r20), float(r21), float(r22), float(t2)],
                     [0, 0, 0, 1]
                 ])
                 pose = np.dot(np.dot(coordinate_exchange, pose), coordinate_exchange.T)
-                trajectory[stamp] = tf.Transform(pose)
+                trajectory[float(stamp)] = tf.Transform(pose)
     return trajectory
