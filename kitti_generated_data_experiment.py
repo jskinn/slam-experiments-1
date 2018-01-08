@@ -93,8 +93,9 @@ class KITTIGeneratedDataExperiment(arvet.batch_analysis.experiment.Experiment):
 
         # Import KITTI datasets
         for sequence_num in range(11):
+            path = os.path.join('datasets', 'KITTI', 'dataset')
             try:
-                path = path_manager.find_dir(os.path.join('datasets', 'KITTI', 'dataset'))
+                path_manager.find_dir(path)
                 # Also check the particular sequence exists
                 path_manager.find_dir(os.path.join(path, 'sequences', "{0:02}".format(sequence_num)))
             except FileNotFoundError:

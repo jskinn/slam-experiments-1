@@ -60,8 +60,9 @@ class RealWorldExperiment(arvet.batch_analysis.experiment.Experiment):
         """
         # --------- REAL WORLD DATASETS -----------
         for sequence_num in range(11):
+            path = os.path.join('datasets', 'KITTI', 'dataset')
             try:
-                path = path_manager.find_dir(os.path.join('datasets', 'KITTI', 'dataset'))
+                path_manager.find_dir(path)
                 # Also check the particular sequence exists
                 path_manager.find_dir(os.path.join(path, 'sequences', "{0:02}".format(sequence_num)))
             except FileNotFoundError:
@@ -98,7 +99,7 @@ class RealWorldExperiment(arvet.batch_analysis.experiment.Experiment):
                 ('EuRoC V2_03_difficult', os.path.join('datasets', 'EuRoC', 'V2_03_difficult'))
             ]:
                 try:
-                    path = path_manager.find_dir(path)
+                    path_manager.find_dir(path)
                 except FileNotFoundError:
                     path = None
                 if path is not None:
@@ -117,8 +118,9 @@ class RealWorldExperiment(arvet.batch_analysis.experiment.Experiment):
                         task_manager.do_task(task)
 
             # Import TUM datasets using the manager. Load all the TUM datasets we can
+            path = os.path.join('datasets', 'TUM')
             try:
-                path = path_manager.find_dir(os.path.join('datasets', 'TUM'))
+                path_manager.find_dir(path)
             except FileNotFoundError:
                 path = None
             if path is not None:

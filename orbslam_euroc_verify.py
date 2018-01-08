@@ -54,7 +54,7 @@ class OrbslamEuRoCVerify(arvet.batch_analysis.experiment.Experiment):
             ('EuRoC MH_01_easy', os.path.join('datasets', 'EuRoC', 'MH_01_easy')),
         ]:
             try:
-                path = path_manager.find_dir(path)
+                path_manager.find_dir(path)
             except FileNotFoundError:
                 path = None
             if path is not None:

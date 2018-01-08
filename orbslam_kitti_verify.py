@@ -51,8 +51,9 @@ class OrbslamKITTIVerify(arvet.batch_analysis.experiment.Experiment):
         # --------- KITTI DATASETS -----------
         # import specific kitti datasets that we have reference results for
         for sequence_num in {0}:
+            path = os.path.join('datasets', 'KITTI', 'dataset')
             try:
-                path = path_manager.find_dir(os.path.join('datasets', 'KITTI', 'dataset'))
+                path_manager.find_dir(path)
                 # Also check the particular sequence exists
                 path_manager.find_dir(os.path.join(path, 'sequences', "{0:02}".format(sequence_num)))
             except FileNotFoundError:
