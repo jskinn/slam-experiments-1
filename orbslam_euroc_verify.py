@@ -52,6 +52,7 @@ class OrbslamEuRoCVerify(arvet.batch_analysis.experiment.Experiment):
         # import specific EuRoC datasets that we have reference results for
         for name, path in [
             ('EuRoC MH_01_easy', os.path.join('datasets', 'EuRoC', 'MH_01_easy')),
+            ('EuRoC MH_04_difficult', os.path.join('datasets', 'EuRoC', 'MH_04_difficult')),
         ]:
             try:
                 path_manager.find_dir(path)
@@ -156,11 +157,16 @@ class OrbslamEuRoCVerify(arvet.batch_analysis.experiment.Experiment):
         :return:
         """
         # Visualize the different trajectories in each group
-        for system_id, reference_filename, name in [
-            (self._orbslam_mono, 'trajectory-euroc-MH01_easy-mono.txt', 'mono'),
-            (self._orbslam_stereo, 'trajectory-euroc-MH01_easy-stereo.txt', 'stereo')
+        for system_id, reference_filename, name, dataset_id in [
+            (self._orbslam_mono, 'trajectory-euroc-MH01_easy-mono.txt', 'mono', self._datasets['EuRoC MH_01_easy']),
+            (self._orbslam_stereo, 'trajectory-euroc-MH01_easy-stereo.txt', 'stereo',
+             self._datasets['EuRoC MH_01_easy']),
+            (self._orbslam_mono, 'trajectory-euroc-MH04_difficult-mono.txt', 'mono',
+             self._datasets['EuRoC MH_04_difficult']),
+            (self._orbslam_stereo, 'trajectory-euroc-MH04_difficult-stereo.txt', 'stereo',
+             self._datasets['EuRoC MH_04_difficult'])
         ]:
-            trial_result_id = self.get_trial_result(system_id, self._datasets['EuRoC MH_01_easy'])
+            trial_result_id = self.get_trial_result(system_id, dataset_id)
             if trial_result_id is not None:
                 trial_result = dh.load_object(db_client, db_client.trials_collection, trial_result_id)
                 if trial_result is not None:
