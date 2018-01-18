@@ -54,23 +54,24 @@ class OrbslamEuRoCVerify(arvet.batch_analysis.experiment.Experiment):
             ('EuRoC MH_01_easy', os.path.join('datasets', 'EuRoC', 'MH_01_easy')),
             ('EuRoC MH_04_difficult', os.path.join('datasets', 'EuRoC', 'MH_04_difficult')),
         ]:
-            try:
-                path_manager.find_dir(path)
-            except FileNotFoundError:
-                path = None
-            if path is not None:
-                task = task_manager.get_import_dataset_task(
-                    module_name='arvet_slam.dataset.euroc.euroc_loader',
-                    path=path,
-                    num_cpus=1,
-                    num_gpus=0,
-                    memory_requirements='3GB',
-                    expected_duration='4:00:00'
-                )
-                if task.is_finished:
-                    self._datasets[name] = task.result
-                    self._set_property('datasets.{0}'.format(name), task.result)
-                else:
+            task = task_manager.get_import_dataset_task(
+                module_name='arvet_slam.dataset.euroc.euroc_loader',
+                path=path,
+                num_cpus=1,
+                num_gpus=0,
+                memory_requirements='3GB',
+                expected_duration='4:00:00'
+            )
+            if task.is_finished:
+                self._datasets[name] = task.result
+                self._set_property('datasets.{0}'.format(name), task.result)
+            else:
+                # Only schedule the task if we can find the dataset
+                try:
+                    path_manager.find_dir(path)
+                except FileNotFoundError:
+                    path = None
+                if path is not None:
                     task_manager.do_task(task)
 
         # --------- SYSTEMS -----------
@@ -287,11 +288,14 @@ def load_ref_trajectory(filename: str) -> typing.Mapping[float, tf.Transform]:
                                      [-1, 0, 0, 0],
                                      [0, -1, 0, 0],
                                      [0, 0, 0, 1]])
+    first_stamp = None
     with open(filename, 'r') as trajectory_file:
         for line in trajectory_file:
             parts = line.split(' ')
             if len(parts) >= 13:
                 stamp, r00, r01, r02, t0, r10, r11, r12, t1, r20, r21, r22, t2 = parts[0:13]
+                if first_stamp is None:
+                    first_stamp = float(stamp)
                 pose = np.matrix([
                     [float(r00), float(r01), float(r02), float(t0)],
                     [float(r10), float(r11), float(r12), float(t1)],
@@ -299,5 +303,5 @@ def load_ref_trajectory(filename: str) -> typing.Mapping[float, tf.Transform]:
                     [0, 0, 0, 1]
                 ])
                 pose = np.dot(np.dot(coordinate_exchange, pose), coordinate_exchange.T)
-                trajectory[float(stamp)] = tf.Transform(pose)
+                trajectory[float(stamp) - first_stamp] = tf.Transform(pose)
     return trajectory
