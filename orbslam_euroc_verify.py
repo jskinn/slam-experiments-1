@@ -7,36 +7,30 @@ import arvet.util.transform as tf
 import arvet.util.associate as ass
 import arvet.database.client
 import arvet.config.path_manager
-import arvet.batch_analysis.experiment
+import arvet.batch_analysis.simple_experiment
 import arvet.batch_analysis.task_manager
 import arvet_slam.systems.slam.orbslam2 as orbslam2
 import arvet_slam.benchmarks.rpe.relative_pose_error as rpe
 
 
-class OrbslamEuRoCVerify(arvet.batch_analysis.experiment.Experiment):
+class OrbslamEuRoCVerify(arvet.batch_analysis.simple_experiment.SimpleExperiment):
 
-    def __init__(self, orbslam_mono=None, orbslam_stereo=None,
+    def __init__(self, systems=None,
                  datasets=None,
-                 benchmark_rpe=None,
+                 benchmarks=None,
                  trial_map=None, result_map=None, enabled=True, id_=None):
         """
         Constructor. We need parameters to load the different stored parts of this experiment
-        :param orbslam_mono:
-        :param orbslam_stereo:
+        :param systems:
         :param datasets:
-        :param benchmark_rpe:
+        :param benchmarks:
+        :param trial_map:
+        :param result_map:
+        :param enabled:
         :param id_:
         """
-        super().__init__(id_=id_, trial_map=trial_map, result_map=result_map, enabled=enabled)
-        # Systems
-        self._orbslam_mono = orbslam_mono
-        self._orbslam_stereo = orbslam_stereo
-
-        # Image sources
-        self._datasets = datasets if datasets is not None else {}
-
-        # Benchmarks
-        self._benchmark_rpe = benchmark_rpe
+        super().__init__(systems=systems, datasets=datasets, benchmarks=benchmarks,
+                         id_=id_, trial_map=trial_map, result_map=result_map, enabled=enabled)
 
     def do_imports(self, task_manager: arvet.batch_analysis.task_manager.TaskManager,
                    path_manager: arvet.config.path_manager.PathManager,
@@ -77,13 +71,10 @@ class OrbslamEuRoCVerify(arvet.batch_analysis.experiment.Experiment):
         # --------- SYSTEMS -----------
         # ORBSLAM2 - Create 2 variants, with different procesing modes
         vocab_path = os.path.join('systems', 'ORBSLAM2', 'ORBvoc.txt')
-        try:
-            path_manager.find_file(vocab_path)
-        except FileNotFoundError:
-            vocab_path = None
-
-        if vocab_path is not None and self._orbslam_mono is None:
-            self._orbslam_mono = dh.add_unique(db_client.system_collection, orbslam2.ORBSLAM2(
+        self.import_system(
+            name='ORBSLAM2 Monocular',
+            db_client=db_client,
+            system=orbslam2.ORBSLAM2(
                 vocabulary_file=vocab_path,
                 mode=orbslam2.SensorMode.MONOCULAR,
                 settings={
@@ -95,11 +86,12 @@ class OrbslamEuRoCVerify(arvet.batch_analysis.experiment.Experiment):
                         'minThFAST': 7
                     }
                 }
-            ))
-            self._set_property('orbslam_mono', self._orbslam_mono)
-
-        if vocab_path is not None and self._orbslam_stereo is None:
-            self._orbslam_stereo = dh.add_unique(db_client.system_collection, orbslam2.ORBSLAM2(
+            )
+        )
+        self.import_system(
+            name='ORBSLAM2 Stereo',
+            db_client=db_client,
+            system=orbslam2.ORBSLAM2(
                 vocabulary_file=vocab_path,
                 mode=orbslam2.SensorMode.STEREO,
                 settings={
@@ -112,44 +104,24 @@ class OrbslamEuRoCVerify(arvet.batch_analysis.experiment.Experiment):
                         'minThFAST': 7
                     }
                 }
-            ))
-            self._set_property('orbslam_stereo', self._orbslam_stereo)
+            )
+        )
 
         # --------- BENCHMARKS -----------
         # Create and store the benchmarks for camera trajectories
         # Just using the default settings for now
-        if self._benchmark_rpe is None:
-            self._benchmark_rpe = dh.add_unique(db_client.benchmarks_collection, rpe.BenchmarkRPE(
+        self.import_benchmark(
+            name='Relative Pose Error',
+            db_client=db_client,
+            benchmark=rpe.BenchmarkRPE(
                 max_pairs=10000,
                 fixed_delta=False,
                 delta=1.0,
                 delta_unit='s',
                 offset=0,
-                scale_=1))
-            self._set_property('benchmark_rpe', self._benchmark_rpe)
-
-    def schedule_tasks(self, task_manager: arvet.batch_analysis.task_manager.TaskManager,
-                       db_client: arvet.database.client.DatabaseClient):
-        """
-        Schedule the running of systems with image sources, and the benchmarking of the trial results so produced.
-        :param task_manager:
-        :param db_client:
-        :return:
-        """
-        # Group everything up
-        # All systems
-        systems = [self._orbslam_mono, self._orbslam_stereo]
-        # All image datasets
-        datasets = list(self._datasets.values())
-        # All benchmarks
-        benchmarks = [self._benchmark_rpe]
-
-        # Schedule all combinations of systems with the generated datasets
-        self.schedule_all(task_manager=task_manager,
-                          db_client=db_client,
-                          systems=systems,
-                          image_sources=datasets,
-                          benchmarks=benchmarks)
+                scale_=1
+            )
+        )
 
     def plot_results(self, db_client: arvet.database.client.DatabaseClient):
         """
@@ -173,62 +145,6 @@ class OrbslamEuRoCVerify(arvet.batch_analysis.experiment.Experiment):
                 if trial_result is not None:
                     plot_difference(trial_result.get_computed_camera_poses(), reference_filename,
                                     '{0} on EuRoC MH_01_easy'.format(name))
-
-    def serialize(self):
-        serialized = super().serialize()
-        dh.add_schema_version(serialized, 'experiments:visual_slam:VisualSlamExperiment', 2)
-
-        # Systems
-        serialized['orbslam_mono'] = self._orbslam_mono
-        serialized['orbslam_stereo'] = self._orbslam_stereo
-
-        # Image Sources
-        serialized['datasets'] = self._datasets
-
-        # Benchmarks
-        serialized['benchmark_rpe'] = self._benchmark_rpe
-
-        return serialized
-
-    @classmethod
-    def deserialize(cls, serialized_representation, db_client, **kwargs):
-        update_schema(serialized_representation, db_client)
-
-        # Systems
-        if 'orbslam_mono' in serialized_representation:
-            kwargs['orbslam_mono'] = serialized_representation['orbslam_mono']
-        if 'orbslam_stereo' in serialized_representation:
-            kwargs['orbslam_stereo'] = serialized_representation['orbslam_stereo']
-
-        # Datasets
-        if 'datasets' in serialized_representation:
-            kwargs['datasets'] = serialized_representation['datasets']
-
-        # Benchmarks
-        if 'benchmark_rpe' in serialized_representation:
-            kwargs['benchmark_rpe'] = serialized_representation['benchmark_rpe']
-
-        return super().deserialize(serialized_representation, db_client, **kwargs)
-
-
-def update_schema(serialized: dict, db_client: arvet.database.client.DatabaseClient):
-    # version = dh.get_schema_version(serialized, 'experiments:visual_slam:VisualSlamExperiment')
-
-    # Clean out invalid ids
-    if 'orbslam_mono' in serialized and \
-            not dh.check_reference_is_valid(db_client.system_collection, serialized['orbslam_mono']):
-        del serialized['orbslam_mono']
-    if 'orbslam_stereo' in serialized and \
-            not dh.check_reference_is_valid(db_client.system_collection, serialized['orbslam_stereo']):
-        del serialized['orbslam_stereo']
-    if 'datasets' in serialized:
-        keys = list(serialized['datasets'].keys())
-        for key in keys:
-            if not dh.check_reference_is_valid(db_client.image_source_collection, serialized['datasets'][key]):
-                del serialized['datasets'][key]
-    if 'benchmark_rpe' in serialized and \
-            not dh.check_reference_is_valid(db_client.system_collection, serialized['benchmark_rpe']):
-        del serialized['benchmark_rpe']
 
 
 def plot_difference(computed_trajectory: typing.Mapping[float, tf.Transform], reference_filename: str, name: str):

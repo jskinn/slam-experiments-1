@@ -8,7 +8,7 @@ import arvet.util.dict_utils as du
 import arvet.util.transform as tf
 import arvet.database.client
 import arvet.config.path_manager
-import arvet.batch_analysis.experiment
+import arvet.batch_analysis.simple_experiment
 import arvet.batch_analysis.task_manager
 import arvet_slam.systems.visual_odometry.libviso2.libviso2 as libviso2
 import arvet_slam.systems.slam.orbslam2 as orbslam2
@@ -19,34 +19,24 @@ import arvet_slam.benchmarks.trajectory_drift.trajectory_drift as traj_drift
 import arvet_slam.benchmarks.tracking.tracking_benchmark as tracking_benchmark
 
 
-class RealWorldExperiment(arvet.batch_analysis.experiment.Experiment):
+class RealWorldExperiment(arvet.batch_analysis.simple_experiment.SimpleExperiment):
 
-    def __init__(self, libviso_system=None, orbslam_systems=None,
+    def __init__(self, systems=None,
                  datasets=None,
-                 benchmark_rpe=None, benchmark_ate=None, benchmark_trajectory_drift=None, benchmark_tracking=None,
+                 benchmarks=None,
                  trial_map=None, result_map=None, enabled=True, id_=None):
         """
         Constructor. We need parameters to load the different stored parts of this experiment
-        :param libviso_system:
+        :param systems:
         :param datasets:
-        :param benchmark_rpe:
-        :param benchmark_ate:
-        :param benchmark_trajectory_drift:
+        :param benchmarks:
+        :param trial_map:
+        :param result_map:
+        :param enabled:
         :param id_:
         """
-        super().__init__(id_=id_, trial_map=trial_map, result_map=result_map, enabled=enabled)
-        # Systems
-        self._libviso_system = libviso_system
-        self._orbslam_systems = orbslam_systems if orbslam_systems is not None else {}
-
-        # Image sources
-        self._datasets = datasets if datasets is not None else {}
-
-        # Benchmarks
-        self._benchmark_rpe = benchmark_rpe
-        self._benchmark_ate = benchmark_ate
-        self._benchmark_trajectory_drift = benchmark_trajectory_drift
-        self._benchmark_tracking = benchmark_tracking
+        super().__init__(systems=systems, datasets=datasets, benchmarks=benchmarks,
+                         id_=id_, trial_map=trial_map, result_map=result_map, enabled=enabled)
 
     def do_imports(self, task_manager: arvet.batch_analysis.task_manager.TaskManager,
                    path_manager: arvet.config.path_manager.PathManager,
@@ -59,162 +49,103 @@ class RealWorldExperiment(arvet.batch_analysis.experiment.Experiment):
         :return:
         """
         # --------- REAL WORLD DATASETS -----------
+        # Import KITTI datasets
         for sequence_num in range(11):
-            path = os.path.join('datasets', 'KITTI', 'dataset')
-            try:
-                path_manager.find_dir(path)
-                # Also check the particular sequence exists
-                path_manager.find_dir(os.path.join(path, 'sequences', "{0:02}".format(sequence_num)))
-            except FileNotFoundError:
-                path = None
-            if path is not None:
-                task = task_manager.get_import_dataset_task(
-                    module_name='arvet_slam.dataset.kitti.kitti_loader',
-                    path=path,
-                    additional_args={'sequence_number': sequence_num},
-                    num_cpus=1,
-                    num_gpus=0,
-                    memory_requirements='3GB',
-                    expected_duration='12:00:00'
-                )
-                if task.is_finished:
-                    name = 'KITTI trajectory {}'.format(sequence_num)
-                    self._datasets[name] = task.result
-                    self._set_property('datasets.{0}'.format(name), task.result)
-                else:
-                    task_manager.do_task(task)
+            self.import_dataset(
+                name='KITTI {0:02}'.format(sequence_num),
+                module_name='arvet_slam.dataset.kitti.kitti_loader',
+                path=os.path.join('datasets', 'KITTI', 'dataset'),
+                additional_args={'sequence_number': sequence_num},
+                task_manager=task_manager,
+                path_manager=path_manager
+            )
 
-            # Import EuRoC datasets
-            for name, path in [
-                ('EuRoC MH_01_easy', os.path.join('datasets', 'EuRoC', 'MH_01_easy')),
-                ('EuRoC MH_02_easy', os.path.join('datasets', 'EuRoC', 'MH_02_easy')),
-                ('EuRoC MH_02_medium', os.path.join('datasets', 'EuRoC', 'MH_03_medium')),
-                ('EuRoC MH_04_difficult', os.path.join('datasets', 'EuRoC', 'MH_04_difficult')),
-                ('EuRoC MH_05_difficult', os.path.join('datasets', 'EuRoC', 'MH_05_difficult')),
-                ('EuRoC V1_01_easy', os.path.join('datasets', 'EuRoC', 'V1_01_easy')),
-                ('EuRoC V1_02_medium', os.path.join('datasets', 'EuRoC', 'V1_02_medium')),
-                ('EuRoC V1_03_difficult', os.path.join('datasets', 'EuRoC', 'V1_03_difficult')),
-                ('EuRoC V2_01_easy', os.path.join('datasets', 'EuRoC', 'V2_01_easy')),
-                ('EuRoC V2_02_medium', os.path.join('datasets', 'EuRoC', 'V2_02_medium')),
-                ('EuRoC V2_03_difficult', os.path.join('datasets', 'EuRoC', 'V2_03_difficult'))
-            ]:
-                try:
-                    path_manager.find_dir(path)
-                except FileNotFoundError:
-                    path = None
-                if path is not None:
-                    task = task_manager.get_import_dataset_task(
-                        module_name='arvet_slam.dataset.euroc.euroc_loader',
-                        path=path,
-                        num_cpus=1,
-                        num_gpus=0,
-                        memory_requirements='3GB',
-                        expected_duration='4:00:00'
-                    )
-                    if task.is_finished:
-                        self._datasets[name] = task.result
-                        self._set_property('datasets.{0}'.format(name), task.result)
-                    else:
-                        task_manager.do_task(task)
+        # Import EuRoC datasets
+        for name, path in [
+            ('EuRoC MH_01_easy', os.path.join('datasets', 'EuRoC', 'MH_01_easy')),
+            ('EuRoC MH_02_easy', os.path.join('datasets', 'EuRoC', 'MH_02_easy')),
+            ('EuRoC MH_02_medium', os.path.join('datasets', 'EuRoC', 'MH_03_medium')),
+            ('EuRoC MH_04_difficult', os.path.join('datasets', 'EuRoC', 'MH_04_difficult')),
+            ('EuRoC MH_05_difficult', os.path.join('datasets', 'EuRoC', 'MH_05_difficult')),
+            ('EuRoC V1_01_easy', os.path.join('datasets', 'EuRoC', 'V1_01_easy')),
+            ('EuRoC V1_02_medium', os.path.join('datasets', 'EuRoC', 'V1_02_medium')),
+            ('EuRoC V1_03_difficult', os.path.join('datasets', 'EuRoC', 'V1_03_difficult')),
+            ('EuRoC V2_01_easy', os.path.join('datasets', 'EuRoC', 'V2_01_easy')),
+            ('EuRoC V2_02_medium', os.path.join('datasets', 'EuRoC', 'V2_02_medium')),
+            ('EuRoC V2_03_difficult', os.path.join('datasets', 'EuRoC', 'V2_03_difficult'))
+        ]:
+            self.import_dataset(
+                name=name,
+                module_name='arvet_slam.dataset.euroc.euroc_loader',
+                path=path,
+                task_manager=task_manager,
+                path_manager=path_manager
+            )
 
-            # Import TUM datasets using the manager. Load all the TUM datasets we can
-            path = os.path.join('datasets', 'TUM')
-            try:
-                path_manager.find_dir(path)
-            except FileNotFoundError:
-                path = None
-            if path is not None:
-                tum_manager = arvet_slam.dataset.tum.tum_manager.TUMManager(
-                    {name: True for name in arvet_slam.dataset.tum.tum_manager.dataset_names})
-                tum_manager.do_imports(path, task_manager)
-                for name, dataset_id in tum_manager.datasets:
-                    extended_name = 'TUM ' + name
-                    if extended_name not in self._datasets or self._datasets[extended_name] != dataset_id:
-                        self._datasets[extended_name] = dataset_id
-                        self._set_property('datasets.{0}'.format(extended_name), dataset_id)
+        # Import TUM datasets without using the manager, it is unnecessary
+        for folder in arvet_slam.dataset.tum.tum_manager.dataset_names:
+            self.import_dataset(
+                name="TUM {0}".format(folder),
+                module_name='arvet_slam.dataset.tum.tum_loader',
+                path=os.path.join('datasets', 'TUM', folder),
+                task_manager=task_manager,
+                path_manager=path_manager
+            )
 
         # --------- SYSTEMS -----------
-        if self._libviso_system is None:
-            self._libviso_system = dh.add_unique(db_client.system_collection, libviso2.LibVisOSystem())
-            self._set_property('libviso', self._libviso_system)
 
-        # ORBSLAM2 - Create 9 variants, with different procesing modes
+        self.import_system(name='LibVisO', system=libviso2.LibVisOSystem(), db_client=db_client)
+
+        # ORBSLAM2 - Create 3 variants, with different procesing modes
+        vocab_path = os.path.join('systems', 'ORBSLAM2', 'ORBvoc.txt')
         for sensor_mode in {orbslam2.SensorMode.STEREO, orbslam2.SensorMode.RGBD, orbslam2.SensorMode.MONOCULAR}:
-                name = 'ORBSLAM2 {mode}'.format(mode=sensor_mode.name.lower())
-                vocab_path = os.path.join('systems', 'ORBSLAM2', 'ORBvoc.txt')
-                is_valid_path = True
-                try:
-                    path_manager.find_file(vocab_path)
-                except FileNotFoundError:
-                    is_valid_path = False
-
-                if name not in self._orbslam_systems and is_valid_path:
-                    orbslam_id = dh.add_unique(db_client.system_collection, orbslam2.ORBSLAM2(
-                        vocabulary_file=vocab_path,
-                        mode=sensor_mode,
-                        settings={
-                            'ORBextractor': {
-                                'nFeatures': 1500
-                            }
-                        }
-                    ))
-                    self._orbslam_systems[name] = orbslam_id
-                    self._set_property('orbslam_systems.{}'.format(name), orbslam_id)
+            self.import_system(
+                name='ORBSLAM2 {mode}'.format(mode=sensor_mode.name.lower()),
+                db_client=db_client,
+                system=orbslam2.ORBSLAM2(
+                    vocabulary_file=vocab_path,
+                    mode=sensor_mode,
+                    settings={'ORBextractor': {'nFeatures': 1500}}
+                )
+            )
 
         # --------- BENCHMARKS -----------
         # Create and store the benchmarks for camera trajectories
         # Just using the default settings for now
-        if self._benchmark_rpe is None:
-            self._benchmark_rpe = dh.add_unique(db_client.benchmarks_collection, rpe.BenchmarkRPE(
+        self.import_benchmark(
+            name='Relative Pose Error',
+            db_client=db_client,
+            benchmark=rpe.BenchmarkRPE(
                 max_pairs=10000,
                 fixed_delta=False,
                 delta=1.0,
                 delta_unit='s',
                 offset=0,
-                scale_=1))
-            self._set_property('benchmark_rpe', self._benchmark_rpe)
-        if self._benchmark_ate is None:
-            self._benchmark_ate = dh.add_unique(db_client.benchmarks_collection, ate.BenchmarkATE(
+                scale_=1
+            )
+        )
+        self.import_benchmark(
+            name='Absolute Trajectory Error',
+            db_client=db_client,
+            benchmark=ate.BenchmarkATE(
                 offset=0,
                 max_difference=0.2,
-                scale=1))
-            self._set_property('benchmark_ate', self._benchmark_ate)
-        if self._benchmark_trajectory_drift is None:
-            self._benchmark_trajectory_drift = dh.add_unique(
-                db_client.benchmarks_collection,
-                traj_drift.BenchmarkTrajectoryDrift(
-                    segment_lengths=[100, 200, 300, 400, 500, 600, 700, 800],
-                    step_size=10
-                ))
-            self._set_property('benchmark_trajectory_drift', self._benchmark_trajectory_drift)
-        if self._benchmark_tracking is None:
-            self._benchmark_tracking = dh.add_unique(db_client.benchmarks_collection,
-                                                     tracking_benchmark.TrackingBenchmark(initializing_is_lost=True))
-            self._set_property('benchmark_tracking', self._benchmark_tracking)
-
-    def schedule_tasks(self, task_manager: arvet.batch_analysis.task_manager.TaskManager,
-                       db_client: arvet.database.client.DatabaseClient):
-        """
-        Schedule the running of systems with image sources, and the benchmarking of the trial results so produced.
-        :param task_manager:
-        :param db_client:
-        :return:
-        """
-        # Group everything up
-        # All systems
-        systems = [self._libviso_system] + list(self._orbslam_systems.values())
-        # All image datasets
-        datasets = list(self._datasets.values())
-        # All benchmarks
-        benchmarks = [self._benchmark_rpe, self._benchmark_ate,
-                      self._benchmark_trajectory_drift, self._benchmark_tracking]
-
-        # Schedule all combinations of systems with the generated datasets
-        self.schedule_all(task_manager=task_manager,
-                          db_client=db_client,
-                          systems=systems,
-                          image_sources=datasets,
-                          benchmarks=benchmarks)
+                scale=1
+            )
+        )
+        self.import_benchmark(
+            name='Trajectory Drift',
+            db_client=db_client,
+            benchmark=traj_drift.BenchmarkTrajectoryDrift(
+                segment_lengths=[100, 200, 300, 400, 500, 600, 700, 800],
+                step_size=10
+            )
+        )
+        self.import_benchmark(
+            name='Tracking Statistics',
+            db_client=db_client,
+            benchmark=tracking_benchmark.TrackingBenchmark(initializing_is_lost=True)
+        )
 
     def plot_results(self, db_client: arvet.database.client.DatabaseClient):
         """
@@ -245,10 +176,10 @@ class RealWorldExperiment(arvet.batch_analysis.experiment.Experiment):
             trial_results = {}
             style = {}
             for system_name, system_id in systems.items():
-                trial_result_id = self.get_trial_result(system_id, dataset_id)
-                if trial_result_id is not None:
+                trial_result_list = self.get_trial_results(system_id, dataset_id)
+                if len(trial_result_list) > 0:
                     label = "{0} on {1}".format(system_name, dataset_name)
-                    trial_results[label] = trial_result_id
+                    trial_results[label] = trial_result_list[0]
                     style[label] = '--' if dataset_name == 'reference dataset' else '-'
 
             # Make sure we have at least one result to plot
@@ -303,10 +234,10 @@ class RealWorldExperiment(arvet.batch_analysis.experiment.Experiment):
             # Collect the trial results for each image source in this group
             trial_results = {}
             for system_name, system_id in systems.items():
-                trial_result_id = self.get_trial_result(system_id, dataset_id)
-                if trial_result_id is not None:
+                trial_result_list = self.get_trial_results(system_id, dataset_id)
+                if len(trial_result_list) > 0:
                     label = "{0} on {1}".format(system_name, dataset_name)
-                    trial_results[label] = trial_result_id
+                    trial_results[label] = trial_result_list[0]
 
             # Make sure we have at least one result to plot
             if len(trial_results) >= 1:
@@ -335,51 +266,6 @@ class RealWorldExperiment(arvet.batch_analysis.experiment.Experiment):
 
                 with open('{0}.json'.format(dataset_name), 'w') as json_file:
                     json.dump(json_data, json_file)
-
-    def serialize(self):
-        serialized = super().serialize()
-        dh.add_schema_version(serialized, 'experiments:visual_slam:VisualSlamExperiment', 2)
-
-        # Systems
-        serialized['libviso'] = self._libviso_system
-        serialized['orbslam_systems'] = self._orbslam_systems
-
-        # Image Sources
-        serialized['datasets'] = self._datasets
-
-        # Benchmarks
-        serialized['benchmark_rpe'] = self._benchmark_rpe
-        serialized['benchmark_ate'] = self._benchmark_ate
-        serialized['benchmark_trajectory_drift'] = self._benchmark_trajectory_drift
-        serialized['benchmark_tracking'] = self._benchmark_tracking
-
-        return serialized
-
-    @classmethod
-    def deserialize(cls, serialized_representation, db_client, **kwargs):
-        update_schema(serialized_representation, db_client)
-
-        # Systems
-        if 'libviso' in serialized_representation:
-            kwargs['libviso_system'] = serialized_representation['libviso']
-        if 'orbslam_systems' in serialized_representation:
-            kwargs['orbslam_systems'] = serialized_representation['orbslam_systems']
-
-        # Datasets
-        if 'datasets' in serialized_representation:
-            kwargs['datasets'] = serialized_representation['datasets']
-
-        # Benchmarks
-        if 'benchmark_rpe' in serialized_representation:
-            kwargs['benchmark_rpe'] = serialized_representation['benchmark_rpe']
-        if 'benchmark_ate' in serialized_representation:
-            kwargs['benchmark_ate'] = serialized_representation['benchmark_ate']
-        if 'benchmark_trajectory_drift' in serialized_representation:
-            kwargs['benchmark_trajectory_drift'] = serialized_representation['benchmark_trajectory_drift']
-        if 'benchmark_tracking' in serialized_representation:
-            kwargs['benchmark_tracking'] = serialized_representation['benchmark_tracking']
-
-        return super().deserialize(serialized_representation, db_client, **kwargs)
 
 
 def plot_trajectory(axis, trajectory, label, style='-'):
@@ -429,33 +315,3 @@ def location_to_json(pose: tf.Transform) -> typing.List[float]:
         pose.location[1],
         pose.location[2]
     ]
-
-
-def update_schema(serialized: dict, db_client: arvet.database.client.DatabaseClient):
-    # version = dh.get_schema_version(serialized, 'experiments:visual_slam:VisualSlamExperiment')
-
-    # Clean out invalid ids
-    if 'libviso' in serialized and not dh.check_reference_is_valid(db_client.system_collection, serialized['libviso']):
-        del serialized['libviso']
-    if 'orbslam_systems' in serialized:
-        keys = list(serialized['orbslam_systems'].keys())
-        for key in keys:
-            if not dh.check_reference_is_valid(db_client.system_collection, serialized['orbslam_systems'][key]):
-                del serialized['orbslam_systems'][key]
-    if 'datasets' in serialized:
-        keys = list(serialized['datasets'].keys())
-        for key in keys:
-            if not dh.check_reference_is_valid(db_client.image_source_collection, serialized['datasets'][key]):
-                del serialized['datasets'][key]
-    if 'benchmark_rpe' in serialized and \
-            not dh.check_reference_is_valid(db_client.system_collection, serialized['benchmark_rpe']):
-        del serialized['benchmark_rpe']
-    if 'benchmark_ate' in serialized and \
-            not dh.check_reference_is_valid(db_client.system_collection, serialized['benchmark_ate']):
-        del serialized['benchmark_ate']
-    if 'benchmark_trajectory_drift' in serialized and \
-            not dh.check_reference_is_valid(db_client.system_collection, serialized['benchmark_trajectory_drift']):
-        del serialized['benchmark_trajectory_drift']
-    if 'benchmark_tracking' in serialized and \
-            not dh.check_reference_is_valid(db_client.system_collection, serialized['benchmark_tracking']):
-        del serialized['benchmark_tracking']

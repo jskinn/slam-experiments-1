@@ -62,6 +62,7 @@ class SimpleMotionExperiment(arvet.batch_analysis.experiment.Experiment):
         """
         Import image sources for evaluation in this experiment
         :param task_manager: The task manager, for creating import tasks
+        :param path_manager: The path manager, for finding dataset and simulator paths
         :param db_client: The database client, for saving declared objects too small to need a task
         :return:
         """
@@ -235,10 +236,13 @@ class SimpleMotionExperiment(arvet.batch_analysis.experiment.Experiment):
             trial_results = {}
             for system_name, system_id in systems.items():
                 for dataset_name, dataset_id in image_sources.items():
-                    trial_result_id = self.get_trial_result(system_id, dataset_id)
-                    if trial_result_id is not None:
-                        label = "{0} on {1}".format(system_name, dataset_name)
-                        trial_results[label] = trial_result_id
+                    trial_result_list = self.get_trial_results(system_id, dataset_id)
+                    label = "{0} on {1}".format(system_name, dataset_name)
+                    for idx in range(len(trial_result_list)):
+                        if len(trial_result_list) > 1:
+                            trial_results[label + ' repeat {0}'.format(idx)] = trial_result_list[idx]
+                        else:
+                            trial_results[label] = trial_result_list[idx]
 
             # Make sure we have at least one result to plot
             if len(trial_results) >= 1:
@@ -322,12 +326,15 @@ class SimpleMotionExperiment(arvet.batch_analysis.experiment.Experiment):
             results = {}
             for system_name, system_id in systems.items():
                 for dataset_name, dataset_id in image_sources.items():
-                    trial_result_id = self.get_trial_result(system_id, dataset_id)
-                    if trial_result_id is not None:
-                        result_id = self.get_benchmark_result(trial_result_id, self._benchmark_rpe)
+                    trial_result_list = self.get_trial_results(system_id, dataset_id)
+                    label = "{0} on {1}".format(system_name, dataset_name)
+                    for idx in range(len(trial_result_list)):
+                        result_id = self.get_benchmark_result(trial_result_list[idx], self._benchmark_rpe)
                         if result_id is not None:
-                            label = "{0} on {1}".format(system_name, dataset_name)
-                            results[label] = result_id
+                            if len(trial_result_list) > 1:
+                                results[label + ' repeat {0}'.format(idx)] = result_id
+                            else:
+                                results[label] = result_id
 
             if len(results) > 1:
                 figure = pyplot.figure(figsize=(14, 10), dpi=80)
@@ -377,10 +384,10 @@ class SimpleMotionExperiment(arvet.batch_analysis.experiment.Experiment):
             trial_results = {}
             for system_name, system_id in systems.items():
                 for dataset_name, dataset_id in image_sources.items():
-                    trial_result_id = self.get_trial_result(system_id, dataset_id)
-                    if trial_result_id is not None:
-                        label = "{0} on {1}".format(system_name, dataset_name)
-                        trial_results[label] = trial_result_id
+                    trial_result_list = self.get_trial_results(system_id, dataset_id)
+                    for idx in range(len(trial_result_list)):
+                        label = "{0} on {1} - repeat {2}".format(system_name, dataset_name, idx)
+                        trial_results[label] = trial_result_list[idx]
 
             # Make sure we have at least one result to plot
             if len(trial_results) >= 1:
@@ -409,7 +416,6 @@ class SimpleMotionExperiment(arvet.batch_analysis.experiment.Experiment):
 
                 with open('{0}.json'.format(trajectory_group.name), 'w') as json_file:
                     json.dump(json_data, json_file)
-
 
     def serialize(self):
         serialized = super().serialize()
