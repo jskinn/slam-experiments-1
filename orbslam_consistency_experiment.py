@@ -10,7 +10,6 @@ import arvet.database.client
 import arvet.config.path_manager
 import arvet.batch_analysis.simple_experiment
 import arvet.batch_analysis.task_manager
-import arvet_slam.systems.visual_odometry.libviso2.libviso2 as libviso2
 import arvet_slam.systems.slam.orbslam2 as orbslam2
 import arvet_slam.dataset.tum.tum_manager
 import arvet_slam.benchmarks.rpe.relative_pose_error as rpe
