@@ -3,9 +3,11 @@ import typing
 import os
 import logging
 import json
+import numpy as np
 import arvet.util.database_helpers as dh
 import arvet.util.dict_utils as du
 import arvet.util.transform as tf
+import arvet.util.associate as ass
 import arvet.database.client
 import arvet.config.path_manager
 import arvet.batch_analysis.simple_experiment
@@ -150,9 +152,9 @@ class OrbslamConsistencyExperiment(arvet.batch_analysis.simple_experiment.Simple
         :return:
         """
         # Visualize the different trajectories in each group
-        self._plot_changes(db_client)
+        self._plot_variations(db_client)
 
-    def _plot_changes(self, db_client: arvet.database.client.DatabaseClient):
+    def _plot_variations(self, db_client: arvet.database.client.DatabaseClient):
         """
         Plot the ground-truth and computed trajectories for each system for each trajectory.
         This is important for validation
@@ -163,58 +165,89 @@ class OrbslamConsistencyExperiment(arvet.batch_analysis.simple_experiment.Simple
         # noinspection PyUnresolvedReferences
         from mpl_toolkits.mplot3d import Axes3D
 
-        logging.getLogger(__name__).info("Plotting trajectories...")
-        # Map system ids and simulator ids to printable names
-        systems = du.defaults({'LIBVISO 2': self._libviso_system}, self._orbslam_systems)
+        logging.getLogger(__name__).info("Plotting variations...")
 
-        for dataset_name, dataset_id in self._datasets.items():
-            # Collect the trial results for this dataset
-            trial_results = {}
-            style = {}
-            for system_name, system_id in systems.items():
+        for system_name, system_id in self.systems.items():
+            logging.getLogger(__name__).info("    .... variations for {0}".format(system_name))
+
+            # Collect statistics on all the trajectories
+            times = []
+            trans_precision = []
+            trans_error = []
+            distance = []
+            distance_to_prev_frame = []
+            for dataset_name, dataset_id in self.datasets.items():
+
                 trial_result_list = self.get_trial_results(system_id, dataset_id)
-                if len(trial_result_list) > 0:
-                    label = "{0} on {1}".format(system_name, dataset_name)
-                    trial_results[label] = trial_result_list[0]
-                    style[label] = '--' if dataset_name == 'reference dataset' else '-'
+                ground_truth_traj = None
+                computed_trajectories = []
+                timestamps = []
 
-            # Make sure we have at least one result to plot
-            if len(trial_results) > 1:
-                figure = pyplot.figure(figsize=(14, 10), dpi=80)
-                figure.suptitle("Computed trajectories for {0}".format(dataset_name))
-                ax = figure.add_subplot(111, projection='3d')
-                ax.set_xlabel('x-location')
-                ax.set_ylabel('y-location')
-                ax.set_zlabel('z-location')
-                ax.plot([0], [0], [0], 'ko', label='origin')
-                added_ground_truth = False
-
-                # For each trial result
-                for label, trial_result_id in trial_results.items():
+                # Collect all the trial results
+                for trial_result_id in trial_result_list:
                     trial_result = dh.load_object(db_client, db_client.trials_collection, trial_result_id)
-                    if trial_result is not None:
-                        if trial_result.success:
-                            if not added_ground_truth:
-                                lower, upper = plot_trajectory(ax, trial_result.get_ground_truth_camera_poses(),
-                                                               'ground truth trajectory')
-                                mean = (upper + lower) / 2
-                                lower = 1.2 * lower - mean
-                                upper = 1.2 * upper - mean
-                                ax.set_xlim(lower, upper)
-                                ax.set_ylim(lower, upper)
-                                ax.set_zlim(lower, upper)
-                                added_ground_truth = True
-                            plot_trajectory(ax, trial_result.get_computed_camera_poses(),
-                                            label=label,
-                                            style=style[label])
-                        else:
-                            print("Got failed trial: {0}".format(trial_result.reason))
+                    if trial_result is not None and trial_result.success:
+                        if ground_truth_traj is None:
+                            ground_truth_traj = trial_result.get_ground_truth_camera_poses()
+                        traj = trial_result.get_computed_camera_poses()
+                        computed_trajectories.append(traj)
+                        timestamps.append({k: v for k, v in ass.associate(ground_truth_traj, traj)})
 
-                logging.getLogger(__name__).info("... plotted trajectories for {0}".format(dataset_name))
-                ax.legend()
-                pyplot.tight_layout()
-                pyplot.subplots_adjust(top=0.95, right=0.99)
-        pyplot.show()
+                # Now that we have all the trajectories, we can measure consistency
+                prev_location = None
+                total_distance = 0
+                for time in sorted(ground_truth_traj.keys()):
+                    # Find the mean estimated location for this time
+                    mean_estimate = np.mean([computed_trajectories[idx][timestamps[idx][time]].location
+                                             for idx in range(len(computed_trajectories))
+                                             if time in timestamps[idx]])
+
+                    # Find the distance to the prev frame
+                    current_location = ground_truth_traj[time].location
+                    if prev_location is not None:
+                        to_prev_frame = np.linalg.norm(current_location - prev_location)
+                    else:
+                        to_prev_frame = 0
+                    total_distance += to_prev_frame
+                    prev_location = current_location
+
+                    # For each computed pose at this time
+                    for idx in range(len(computed_trajectories)):
+                        if time in timestamps[idx]:
+                            computed_location = computed_trajectories[idx][timestamps[idx][time]].location
+                            times.append(time)
+                            trans_precision.append(np.linalg.norm(mean_estimate - computed_location))
+                            trans_error.append(np.linalg.norm(current_location - computed_location))
+                            distance.append(total_distance)
+                            distance_to_prev_frame.append(distance_to_prev_frame)
+
+            # Plot precision vs error
+            figure = pyplot.figure(figsize=(14, 10), dpi=80)
+            figure.suptitle("{0} precision vs error".format(system_name))
+            ax = figure.add_subplot(111)
+            ax.set_xlabel('error')
+            ax.set_ylabel('precision')
+            ax.plot(trans_error, trans_precision)
+
+            # Plot precision vs frame distance
+            figure = pyplot.figure(figsize=(14, 10), dpi=80)
+            figure.suptitle("{0} precision vs frame distance".format(system_name))
+            ax = figure.add_subplot(111)
+            ax.set_xlabel('distance to previous frame')
+            ax.set_ylabel('precision')
+            ax.plot(distance_to_prev_frame, trans_precision)
+
+            # Plot precision vs total distance
+            figure = pyplot.figure(figsize=(14, 10), dpi=80)
+            figure.suptitle("{0} precision vs total distance".format(system_name))
+            ax = figure.add_subplot(111)
+            ax.set_xlabel('total distance travelled')
+            ax.set_ylabel('precision')
+            ax.plot(distance, trans_precision)
+
+            pyplot.tight_layout()
+            pyplot.subplots_adjust(top=0.95, right=0.99)
+            pyplot.show()
 
     def export_data(self, db_client: arvet.database.client.DatabaseClient):
         """
