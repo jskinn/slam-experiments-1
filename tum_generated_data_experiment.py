@@ -2,6 +2,7 @@
 import os
 import arvet.util.dict_utils as du
 import arvet.util.trajectory_helpers as traj_help
+import arvet.util.unreal_transform as uetf
 import arvet.database.client
 import arvet.config.path_manager
 import arvet.metadata.image_metadata as imeta
@@ -12,11 +13,11 @@ import arvet_slam.benchmarks.rpe.relative_pose_error as rpe
 import arvet_slam.benchmarks.ate.absolute_trajectory_error as ate
 import arvet_slam.benchmarks.trajectory_drift.trajectory_drift as traj_drift
 import arvet_slam.benchmarks.tracking.tracking_benchmark as tracking_benchmark
-import base_generated_data_experiment
 import data_helpers
+import base_generated_data_experiment
 
 
-class KITTIGeneratedDataExperiment(base_generated_data_experiment.GeneratedDataExperiment):
+class EurocGeneratedDataExperiment(base_generated_data_experiment.GeneratedDataExperiment):
 
     def __init__(self, systems=None,
                  simulators=None,
@@ -47,14 +48,32 @@ class KITTIGeneratedDataExperiment(base_generated_data_experiment.GeneratedDataE
         :param db_client: The database client, for saving declared objects too small to need a task
         :return:
         """
+        super().do_imports(task_manager, path_manager, db_client)
+
         # --------- SIMULATORS -----------
         # Add simulators explicitly, they have different metadata, so we can't just search
         for exe, world_name, environment_type, light_level, time_of_day in [
-            # (
-            #         'simulators/AIUE_V01_001/LinuxNoEditor/tempTest/Binaries/Linux/tempTest',
-            #         'AIUE_V01_001', imeta.EnvironmentType.INDOOR, imeta.LightingLevel.WELL_LIT,
-            #         imeta.TimeOfDay.DAY
-            # )
+            (
+                    'simulators/AIUE_V01_001/LinuxNoEditor/tempTest/Binaries/Linux/tempTest',
+                    'AIUE_V01_001', imeta.EnvironmentType.INDOOR, imeta.LightingLevel.WELL_LIT,
+                    imeta.TimeOfDay.DAY
+            ), (
+                    'simulators/AIUE_V01_002/LinuxNoEditor/tempTest/Binaries/Linux/tempTest',
+                    'AIUE_V01_002', imeta.EnvironmentType.INDOOR, imeta.LightingLevel.WELL_LIT,
+                    imeta.TimeOfDay.DAY
+            ), (
+                    'simulators/AIUE_V01_003/LinuxNoEditor/tempTest/Binaries/Linux/tempTest',
+                    'AIUE_V01_003', imeta.EnvironmentType.INDOOR, imeta.LightingLevel.WELL_LIT,
+                    imeta.TimeOfDay.DAY
+            ), (
+                    'simulators/AIUE_V01_004/LinuxNoEditor/tempTest/Binaries/Linux/tempTest',
+                    'AIUE_V01_004', imeta.EnvironmentType.INDOOR, imeta.LightingLevel.WELL_LIT,
+                    imeta.TimeOfDay.DAY
+            ), (
+                    'simulators/AIUE_V02_001/LinuxNoEditor/tempTest/Binaries/Linux/tempTest',
+                    'AIUE_V02_001', imeta.EnvironmentType.INDOOR, imeta.LightingLevel.WELL_LIT,
+                    imeta.TimeOfDay.DAY
+            )
         ]:
             self.import_simulator(
                 executable_path=exe,
@@ -67,14 +86,22 @@ class KITTIGeneratedDataExperiment(base_generated_data_experiment.GeneratedDataE
 
         # --------- REAL WORLD DATASETS -----------
 
-        # Import KITTI datasets
-        for sequence_num in range(11):
+        # Import TUM datasets with lists of trajectory start points for each simulator
+        for folder, mappings in [
+            ('rgbd_dataset_freiburg1_360', get_frieburg1_360()),
+            ('rgbd_dataset_frieburg1_rpy', get_frieburg1_rpy()),
+            ('rgbd_dataset_frieburg1_xyz', get_frieburg1_xyz()),
+            ('rgbd_dataset_frieburg2_desk', get_frieburg2_desk()),
+            ('rgbd_dataset_frieburg2_rpy', get_frieburg2_rpy()),
+            ('rgbd_dataset_frieburg2_xyz', get_frieburg2_xyz()),
+            ('rgbd_dataset_frieburg3_structure_texture_far', get_frieburg3_structure_texture_far()),
+            ('rgbd_dataset_frieburg3_walking_xyz', get_frieburg3_walking_xyz())
+        ]:
             self.import_dataset(
-                module_name='dataset.kitti.kitti_loader',
-                name='KITTI trajectory {}'.format(sequence_num),
-                path=os.path.join('datasets', 'KITTI', 'dataset'),
-                additional_args={'sequence_number': sequence_num},
-                mappings=get_mapping(sequence_num),
+                module_name='arvet_slam.dataset.tum.tum_loader',
+                path=os.path.join('datasets', 'TUM', folder),
+                name="TUM {0}".format(folder),
+                mappings=mappings,
                 task_manager=task_manager,
                 path_manager=path_manager,
                 db_client=db_client,
@@ -90,8 +117,7 @@ class KITTIGeneratedDataExperiment(base_generated_data_experiment.GeneratedDataE
 
         # ORBSLAM2 - Create 3 variants, with different procesing modes
         vocab_path = os.path.join('systems', 'slam', 'ORBSLAM2', 'ORBvoc.txt')
-        for sensor_mode in {orbslam2.SensorMode.STEREO, orbslam2.SensorMode.RGBD,
-                            orbslam2.SensorMode.MONOCULAR}:
+        for sensor_mode in {orbslam2.SensorMode.STEREO, orbslam2.SensorMode.RGBD, orbslam2.SensorMode.MONOCULAR}:
             self.import_system(
                 name='ORBSLAM2 {mode}'.format(mode=sensor_mode.name.lower()),
                 system=orbslam2.ORBSLAM2(
@@ -177,30 +203,60 @@ class KITTIGeneratedDataExperiment(base_generated_data_experiment.GeneratedDataE
                     for idx, trial_result_id in enumerate(trial_result_list):
                         label = "{0} on {1} repeat {2}".format(system_name, dataset_name, idx)
                         trial_results[label] = trial_result_id
-            data_helpers.export_trajectory_as_json(trial_results, "Generated Data " + trajectory_group.name, db_client)
+            data_helpers.export_trajectory_as_json(
+                trial_results, "Generated Data " + trajectory_group.name, db_client
+            )
 
 
-def get_mapping(sequence_num):
-    if sequence_num is 0:
-        return []
-    elif sequence_num is 1:
-        return []
-    elif sequence_num is 2:
-        return []
-    elif sequence_num is 3:
-        return []
-    elif sequence_num is 4:
-        return []
-    elif sequence_num is 5:
-        return []
-    elif sequence_num is 6:
-        return []
-    elif sequence_num is 7:
-        return []
-    elif sequence_num is 8:
-        return []
-    elif sequence_num is 9:
-        return []
-    elif sequence_num is 10:
-        return []
-    return []
+def get_frieburg1_360():
+    return [
+        ('AIUE_V01_001', uetf.create_serialized((-285, 420, 155), (0, 0, 135))),
+        ('AIUE_V01_001', uetf.create_serialized((-370, -345, 155), (0, 0, 0))),
+    ]
+
+def get_frieburg1_rpy():
+    return [
+        ('AIUE_V01_001', uetf.create_serialized((-325, 200, 105), (0, 0, 180))),
+        ('AIUE_V01_001', uetf.create_serialized((-635, 370, 105), (0, 0, 40))),
+        ('AIUE_V01_001', uetf.create_serialized((615, -310, 135), (0, 0, 170))),
+    ]
+
+def get_frieburg1_xyz():
+    return [
+        ('AIUE_V01_001', uetf.create_serialized((-325, 200, 105), (0, 0, 180))),
+        ('AIUE_V01_001', uetf.create_serialized((-635, 370, 105), (0, 0, 40))),
+        ('AIUE_V01_001', uetf.create_serialized((615, -310, 135), (0, 0, 170))),
+    ]
+
+def get_frieburg2_desk():
+    return [
+        ('AIUE_V01_001', uetf.create_serialized((-250, 515, 80), (0, 0, 0))),
+        ('AIUE_V01_001', uetf.create_serialized((-235, -255, 80), (0, 0, 180))),
+    ]
+
+def get_frieburg2_rpy():
+    return [
+        ('AIUE_V01_001', uetf.create_serialized((-325, 200, 105), (0, 0, 180))),
+        ('AIUE_V01_001', uetf.create_serialized((-635, 370, 105), (0, 0, 40))),
+        ('AIUE_V01_001', uetf.create_serialized((615, -310, 135), (0, 0, 170))),
+    ]
+
+def get_frieburg2_xyz():
+    return [
+        ('AIUE_V01_001', uetf.create_serialized((-325, 200, 105), (0, 0, 180))),
+        ('AIUE_V01_001', uetf.create_serialized((-635, 370, 105), (0, 0, 40))),
+        ('AIUE_V01_001', uetf.create_serialized((615, -310, 135), (0, 0, 170))),
+    ]
+
+def get_frieburg3_structure_texture_far():
+    return [
+        ('AIUE_V01_001', uetf.create_serialized((-400, -490, 100), (0, 0, 125))),
+        ('AIUE_V01_001', uetf.create_serialized((-220, 640, 100), (0, 0, 0))),
+    ]
+
+def get_frieburg3_walking_xyz():
+    return [
+        ('AIUE_V01_001', uetf.create_serialized((-325, 200, 105), (0, 0, 180))),
+        ('AIUE_V01_001', uetf.create_serialized((-635, 370, 105), (0, 0, 40))),
+        ('AIUE_V01_001', uetf.create_serialized((615, -310, 135), (0, 0, 170))),
+    ]

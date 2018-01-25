@@ -1,7 +1,8 @@
 # Copyright (c) 2017, John Skinner
-import os
+import os.path
 import arvet.util.dict_utils as du
 import arvet.util.trajectory_helpers as traj_help
+import arvet.util.unreal_transform as uetf
 import arvet.database.client
 import arvet.config.path_manager
 import arvet.metadata.image_metadata as imeta
@@ -16,7 +17,7 @@ import base_generated_data_experiment
 import data_helpers
 
 
-class KITTIGeneratedDataExperiment(base_generated_data_experiment.GeneratedDataExperiment):
+class EurocGeneratedDataExperiment(base_generated_data_experiment.GeneratedDataExperiment):
 
     def __init__(self, systems=None,
                  simulators=None,
@@ -47,14 +48,32 @@ class KITTIGeneratedDataExperiment(base_generated_data_experiment.GeneratedDataE
         :param db_client: The database client, for saving declared objects too small to need a task
         :return:
         """
+        super().do_imports(task_manager, path_manager, db_client)
+
         # --------- SIMULATORS -----------
         # Add simulators explicitly, they have different metadata, so we can't just search
         for exe, world_name, environment_type, light_level, time_of_day in [
-            # (
-            #         'simulators/AIUE_V01_001/LinuxNoEditor/tempTest/Binaries/Linux/tempTest',
-            #         'AIUE_V01_001', imeta.EnvironmentType.INDOOR, imeta.LightingLevel.WELL_LIT,
-            #         imeta.TimeOfDay.DAY
-            # )
+            (
+                    'simulators/AIUE_V01_001/LinuxNoEditor/tempTest/Binaries/Linux/tempTest',
+                    'AIUE_V01_001', imeta.EnvironmentType.INDOOR, imeta.LightingLevel.WELL_LIT,
+                    imeta.TimeOfDay.DAY
+            ), (
+                    'simulators/AIUE_V01_002/LinuxNoEditor/tempTest/Binaries/Linux/tempTest',
+                    'AIUE_V01_002', imeta.EnvironmentType.INDOOR, imeta.LightingLevel.WELL_LIT,
+                    imeta.TimeOfDay.DAY
+            ), (
+                    'simulators/AIUE_V01_003/LinuxNoEditor/tempTest/Binaries/Linux/tempTest',
+                    'AIUE_V01_003', imeta.EnvironmentType.INDOOR, imeta.LightingLevel.WELL_LIT,
+                    imeta.TimeOfDay.DAY
+            ), (
+                    'simulators/AIUE_V01_004/LinuxNoEditor/tempTest/Binaries/Linux/tempTest',
+                    'AIUE_V01_004', imeta.EnvironmentType.INDOOR, imeta.LightingLevel.WELL_LIT,
+                    imeta.TimeOfDay.DAY
+            ), (
+                    'simulators/AIUE_V02_001/LinuxNoEditor/tempTest/Binaries/Linux/tempTest',
+                    'AIUE_V02_001', imeta.EnvironmentType.INDOOR, imeta.LightingLevel.WELL_LIT,
+                    imeta.TimeOfDay.DAY
+            )
         ]:
             self.import_simulator(
                 executable_path=exe,
@@ -67,14 +86,25 @@ class KITTIGeneratedDataExperiment(base_generated_data_experiment.GeneratedDataE
 
         # --------- REAL WORLD DATASETS -----------
 
-        # Import KITTI datasets
-        for sequence_num in range(11):
+        # Import EuRoC datasets with lists of trajectory start points for each simulator
+        for name, path, mappings in [
+            ('EuRoC MH_01_easy', os.path.join('datasets', 'EuRoC', 'MH_01_easy'), get_MH_01_easy()),
+            ('EuRoC MH_02_easy', os.path.join('datasets', 'EuRoC', 'MH_02_easy'), get_MH_02_easy()),
+            ('EuRoC MH_03_medium', os.path.join('datasets', 'EuRoC', 'MH_03_medium'), get_MH_03_medium()),
+            ('EuRoC MH_04_difficult', os.path.join('datasets', 'EuRoC', 'MH_04_difficult'), get_MH_04_difficult()),
+            ('EuRoC MH_05_difficult', os.path.join('datasets', 'EuRoC', 'MH_05_difficult'), get_MH_05_difficult()),
+            ('EuRoC V1_01_easy', os.path.join('datasets', 'EuRoC', 'V1_01_easy'), get_V1_01_easy()),
+            ('EuRoC V1_02_medium', os.path.join('datasets', 'EuRoC', 'V1_02_medium'), get_V1_02_medium()),
+            ('EuRoC V1_03_difficult', os.path.join('datasets', 'EuRoC', 'V1_03_difficult'), get_V1_03_difficult()),
+            ('EuRoC V2_01_easy', os.path.join('datasets', 'EuRoC', 'V2_01_easy'), get_V2_01_easy()),
+            ('EuRoC V2_02_medium', os.path.join('datasets', 'EuRoC', 'V2_02_medium'), get_V2_02_medium()),
+            ('EuRoC V2_03_difficult', os.path.join('datasets', 'EuRoC', 'V2_03_difficult'), get_V2_03_difficult())
+        ]:
             self.import_dataset(
-                module_name='dataset.kitti.kitti_loader',
-                name='KITTI trajectory {}'.format(sequence_num),
-                path=os.path.join('datasets', 'KITTI', 'dataset'),
-                additional_args={'sequence_number': sequence_num},
-                mappings=get_mapping(sequence_num),
+                module_name='arvet_slam.dataset.euroc.euroc_loader',
+                path=path,
+                name=name,
+                mappings=mappings,
                 task_manager=task_manager,
                 path_manager=path_manager,
                 db_client=db_client,
@@ -90,8 +120,7 @@ class KITTIGeneratedDataExperiment(base_generated_data_experiment.GeneratedDataE
 
         # ORBSLAM2 - Create 3 variants, with different procesing modes
         vocab_path = os.path.join('systems', 'slam', 'ORBSLAM2', 'ORBvoc.txt')
-        for sensor_mode in {orbslam2.SensorMode.STEREO, orbslam2.SensorMode.RGBD,
-                            orbslam2.SensorMode.MONOCULAR}:
+        for sensor_mode in {orbslam2.SensorMode.STEREO, orbslam2.SensorMode.RGBD, orbslam2.SensorMode.MONOCULAR}:
             self.import_system(
                 name='ORBSLAM2 {mode}'.format(mode=sensor_mode.name.lower()),
                 system=orbslam2.ORBSLAM2(
@@ -177,30 +206,60 @@ class KITTIGeneratedDataExperiment(base_generated_data_experiment.GeneratedDataE
                     for idx, trial_result_id in enumerate(trial_result_list):
                         label = "{0} on {1} repeat {2}".format(system_name, dataset_name, idx)
                         trial_results[label] = trial_result_id
-            data_helpers.export_trajectory_as_json(trial_results, "Generated Data " + trajectory_group.name, db_client)
+            data_helpers.export_trajectory_as_json(
+                trial_results, "Generated Data " + trajectory_group.name, db_client
+            )
 
 
-def get_mapping(sequence_num):
-    if sequence_num is 0:
-        return []
-    elif sequence_num is 1:
-        return []
-    elif sequence_num is 2:
-        return []
-    elif sequence_num is 3:
-        return []
-    elif sequence_num is 4:
-        return []
-    elif sequence_num is 5:
-        return []
-    elif sequence_num is 6:
-        return []
-    elif sequence_num is 7:
-        return []
-    elif sequence_num is 8:
-        return []
-    elif sequence_num is 9:
-        return []
-    elif sequence_num is 10:
-        return []
+def get_MH_01_easy():
+    return []
+
+
+def get_MH_02_easy():
+    return []
+
+
+def get_MH_03_medium():
+    return []
+
+
+def get_MH_04_difficult():
+    return []
+
+
+def get_MH_05_difficult():
+    return []
+
+
+def get_V1_01_easy():
+    return [
+        ('AIUE_V01_001', uetf.create_serialized((-300, 400, 170), (0, 0, -95))),
+        ('AIUE_V01_001', uetf.create_serialized((-260, -490, 170), (0, 0, 0))),
+    ]
+
+
+def get_V1_02_medium():
+    return [
+        ('AIUE_V01_001', uetf.create_serialized((-90, 495, 115), (0, 0, 90))),
+        ('AIUE_V01_001', uetf.create_serialized((-310, -460, 115), (0, 0, 10))),
+    ]
+
+
+def get_V1_03_difficult():
+    return [
+        ('AIUE_V01_001', uetf.create_serialized((-520, -120, 115), (0, 0, 180))),
+    ]
+
+
+def get_V2_01_easy():
+    return [
+        ('AIUE_V01_001', uetf.create_serialized((-185, 400, 160), (0, 0, 0))),
+    ]
+
+
+def get_V2_02_medium():
+    return []
+
+
+def get_V2_03_difficult():
     return []
