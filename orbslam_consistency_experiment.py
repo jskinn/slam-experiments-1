@@ -174,14 +174,18 @@ class OrbslamConsistencyExperiment(arvet.batch_analysis.simple_experiment.Simple
             times = []
             trans_precision = []
             trans_error = []
-            distance = []
-            distance_to_prev_frame = []
+            distances = []
+            distances_to_prev_frame = []
+            normalized_points = []
             for dataset_name, dataset_id in self.datasets.items():
 
                 trial_result_list = self.get_trial_results(system_id, dataset_id)
                 ground_truth_traj = None
                 computed_trajectories = []
                 timestamps = []
+
+                if len(trial_result_list) <= 0:
+                    continue
 
                 # Collect all the trial results
                 for trial_result_id in trial_result_list:
@@ -191,16 +195,17 @@ class OrbslamConsistencyExperiment(arvet.batch_analysis.simple_experiment.Simple
                             ground_truth_traj = trial_result.get_ground_truth_camera_poses()
                         traj = trial_result.get_computed_camera_poses()
                         computed_trajectories.append(traj)
-                        timestamps.append({k: v for k, v in ass.associate(ground_truth_traj, traj)})
+                        timestamps.append({k: v for k, v in ass.associate(ground_truth_traj, traj,
+                                                                          max_difference=0.1, offset=0)})
 
                 # Now that we have all the trajectories, we can measure consistency
                 prev_location = None
                 total_distance = 0
                 for time in sorted(ground_truth_traj.keys()):
                     # Find the mean estimated location for this time
-                    mean_estimate = np.mean([computed_trajectories[idx][timestamps[idx][time]].location
-                                             for idx in range(len(computed_trajectories))
-                                             if time in timestamps[idx]])
+                    mean_estimate = np.median([computed_trajectories[idx][timestamps[idx][time]].location
+                                               for idx in range(len(computed_trajectories))
+                                               if time in timestamps[idx]], axis=0)
 
                     # Find the distance to the prev frame
                     current_location = ground_truth_traj[time].location
@@ -218,32 +223,48 @@ class OrbslamConsistencyExperiment(arvet.batch_analysis.simple_experiment.Simple
                             times.append(time)
                             trans_precision.append(np.linalg.norm(mean_estimate - computed_location))
                             trans_error.append(np.linalg.norm(current_location - computed_location))
-                            distance.append(total_distance)
-                            distance_to_prev_frame.append(distance_to_prev_frame)
+                            distances.append(total_distance)
+                            distances_to_prev_frame.append(to_prev_frame)
+                            normalized_points.append(computed_location - mean_estimate)
 
             # Plot precision vs error
             figure = pyplot.figure(figsize=(14, 10), dpi=80)
             figure.suptitle("{0} precision vs error".format(system_name))
             ax = figure.add_subplot(111)
             ax.set_xlabel('error')
-            ax.set_ylabel('precision')
-            ax.plot(trans_error, trans_precision)
+            ax.set_ylabel('absolute deviation')
+            ax.plot(trans_error, trans_precision, 'o', alpha=0.5, markersize=1)
 
             # Plot precision vs frame distance
             figure = pyplot.figure(figsize=(14, 10), dpi=80)
             figure.suptitle("{0} precision vs frame distance".format(system_name))
             ax = figure.add_subplot(111)
             ax.set_xlabel('distance to previous frame')
-            ax.set_ylabel('precision')
-            ax.plot(distance_to_prev_frame, trans_precision)
+            ax.set_ylabel('absolute deviation')
+            ax.plot(distances_to_prev_frame, trans_precision, 'o', alpha=0.5, markersize=1)
 
             # Plot precision vs total distance
             figure = pyplot.figure(figsize=(14, 10), dpi=80)
             figure.suptitle("{0} precision vs total distance".format(system_name))
             ax = figure.add_subplot(111)
             ax.set_xlabel('total distance travelled')
-            ax.set_ylabel('precision')
-            ax.plot(distance, trans_precision)
+            ax.set_ylabel('absolute deviation')
+            ax.plot(distances, trans_precision, 'o', alpha=0.5, markersize=1)
+
+            # Histogram the distribution around the mean estimated
+            figure = pyplot.figure(figsize=(14, 10), dpi=80)
+            figure.suptitle("{0} distribution of variation".format(system_name))
+            ax = figure.add_subplot(111)
+            ax.set_xlabel('meters')
+            ax.set_ylabel('frequency')
+            normalized_points = np.asarray(normalized_points)
+            std = np.std(normalized_points[:, 0])
+            ax.hist(normalized_points[:, 0], 100, range=(-4 * std, 4*std), label='x', alpha=0.5)
+            std = np.std(normalized_points[:, 1])
+            ax.hist(normalized_points[:, 1], 100, range=(-4 * std, 4*std), label='y', alpha=0.5)
+            std = np.std(normalized_points[:, 2])
+            ax.hist(normalized_points[:, 2], 100, range=(-4 * std, 4*std), label='z', alpha=0.5)
+            ax.legend()
 
             pyplot.tight_layout()
             pyplot.subplots_adjust(top=0.95, right=0.99)
