@@ -4,9 +4,10 @@ import os
 import logging
 import json
 import arvet.util.database_helpers as dh
-import arvet.util.dict_utils as du
 import arvet.util.transform as tf
 import arvet.database.client
+import arvet.util.unreal_transform as uetf
+import arvet.util.trajectory_helpers as traj_help
 import arvet.config.path_manager
 import arvet.batch_analysis.simple_experiment
 import arvet.batch_analysis.task_manager
@@ -17,6 +18,7 @@ import arvet_slam.benchmarks.rpe.relative_pose_error as rpe
 import arvet_slam.benchmarks.ate.absolute_trajectory_error as ate
 import arvet_slam.benchmarks.trajectory_drift.trajectory_drift as traj_drift
 import arvet_slam.benchmarks.tracking.tracking_benchmark as tracking_benchmark
+import data_helpers
 
 
 class RealWorldExperiment(arvet.batch_analysis.simple_experiment.SimpleExperiment):
@@ -168,14 +170,12 @@ class RealWorldExperiment(arvet.batch_analysis.simple_experiment.SimpleExperimen
         from mpl_toolkits.mplot3d import Axes3D
 
         logging.getLogger(__name__).info("Plotting trajectories...")
-        # Map system ids and simulator ids to printable names
-        systems = du.defaults({'LIBVISO 2': self._libviso_system}, self._orbslam_systems)
 
-        for dataset_name, dataset_id in self._datasets.items():
+        for dataset_name, dataset_id in self.datasets.items():
             # Collect the trial results for this dataset
             trial_results = {}
             style = {}
-            for system_name, system_id in systems.items():
+            for system_name, system_id in self.systems.items():
                 trial_result_list = self.get_trial_results(system_id, dataset_id)
                 if len(trial_result_list) > 0:
                     label = "{0} on {1}".format(system_name, dataset_name)
@@ -199,8 +199,8 @@ class RealWorldExperiment(arvet.batch_analysis.simple_experiment.SimpleExperimen
                     if trial_result is not None:
                         if trial_result.success:
                             if not added_ground_truth:
-                                lower, upper = plot_trajectory(ax, trial_result.get_ground_truth_camera_poses(),
-                                                               'ground truth trajectory')
+                                lower, upper = data_helpers.plot_trajectory(
+                                    ax, trial_result.get_ground_truth_camera_poses(), 'ground truth trajectory')
                                 mean = (upper + lower) / 2
                                 lower = 1.2 * lower - mean
                                 upper = 1.2 * upper - mean
@@ -208,9 +208,9 @@ class RealWorldExperiment(arvet.batch_analysis.simple_experiment.SimpleExperimen
                                 ax.set_ylim(lower, upper)
                                 ax.set_zlim(lower, upper)
                                 added_ground_truth = True
-                            plot_trajectory(ax, trial_result.get_computed_camera_poses(),
-                                            label=label,
-                                            style=style[label])
+                            data_helpers.plot_trajectory(ax, trial_result.get_computed_camera_poses(),
+                                                         label=label,
+                                                         style=style[label])
                         else:
                             print("Got failed trial: {0}".format(trial_result.reason))
 
@@ -228,90 +228,14 @@ class RealWorldExperiment(arvet.batch_analysis.simple_experiment.SimpleExperimen
         :param db_client:
         :return:
         """
-        systems = du.defaults({'LIBVISO 2': self._libviso_system}, self._orbslam_systems)
 
-        for dataset_name, dataset_id in self._datasets.items():
+        for dataset_name, dataset_id in self.datasets.items():
+
             # Collect the trial results for each image source in this group
             trial_results = {}
-            for system_name, system_id in systems.items():
-                trial_result_list = self.get_trial_results(system_id, dataset_id)
-                if len(trial_result_list) > 0:
-                    label = "{0} on {1}".format(system_name, dataset_name)
-                    trial_results[label] = trial_result_list[0]
-
-            # Make sure we have at least one result to plot
-            if len(trial_results) >= 1:
-                json_data = {}
-                added_ground_truth = False
-
-                # For each trial result
-                for label, trial_result_id in trial_results.items():
-                    trial_result = dh.load_object(db_client, db_client.trials_collection, trial_result_id)
-                    if trial_result is not None:
-                        if trial_result.success:
-                            if not added_ground_truth:
-                                added_ground_truth = True
-                                trajectory = trial_result.get_ground_truth_camera_poses()
-                                if len(trajectory) > 0:
-                                    first_pose = trajectory[min(trajectory.keys())]
-                                    json_data['ground_truth'] = [
-                                        [time] + location_to_json(first_pose.find_relative(pose))
-                                        for time, pose in trajectory.items()
-                                    ]
-                            trajectory = trial_result.get_computed_camera_poses()
-                            if len(trajectory) > 0:
-                                first_pose = trajectory[min(trajectory.keys())]
-                                json_data[label] = [[time] + location_to_json(first_pose.find_relative(pose))
-                                                    for time, pose in trajectory.items()]
-
-                with open('{0}.json'.format(dataset_name), 'w') as json_file:
-                    json.dump(json_data, json_file)
-
-
-def plot_trajectory(axis, trajectory, label, style='-'):
-    """
-    Simple helper to plot a trajectory on a 3D axis.
-    Will normalise the trajectory to start at (0,0,0) and facing down the x axis,
-    that is, all poses are relative to the first one.
-    :param axis: The axis on which to plot
-    :param trajectory: A map of timestamps to camera poses
-    :param label: The label for the series
-    :param style: The line style to use for the trajectory. Lets us distinguish virtual and real world results.
-    :return: The minimum and maximum coordinate values, for axis sizing.
-    """
-    x = []
-    y = []
-    z = []
-    max_point = 0
-    min_point = 0
-    times = sorted(trajectory.keys())
-    first_pose = None
-    for timestamp in times:
-        pose = trajectory[timestamp]
-        if first_pose is None:
-            first_pose = pose
-            x.append(0)
-            y.append(0)
-            z.append(0)
-        else:
-            pose = first_pose.find_relative(pose)
-            max_point = max(max_point, pose.location[0], pose.location[1], pose.location[2])
-            min_point = min(min_point, pose.location[0], pose.location[1], pose.location[2])
-            x.append(pose.location[0])
-            y.append(pose.location[1])
-            z.append(pose.location[2])
-    axis.plot(x, y, z, style, label=label, alpha=0.7)
-    return min_point, max_point
-
-
-def location_to_json(pose: tf.Transform) -> typing.List[float]:
-    """
-    A simple helper to pull location from a transform and return it
-    :param pose: A Transform object
-    :return: The list of coordinates of it's location
-    """
-    return [
-        pose.location[0],
-        pose.location[1],
-        pose.location[2]
-    ]
+            for system_name, system_id in self.systems.items():
+                trial_result_list = self.get_trial_result(system_id, dataset_id)
+                for idx, trial_result_id in enumerate(trial_result_list):
+                    label = "{0} on {1} repeat {2}".format(system_name, dataset_name, idx)
+                    trial_results[label] = trial_result_id
+            data_helpers.export_trajectory_as_json(trial_results, "Real World " + dataset_name, db_client)

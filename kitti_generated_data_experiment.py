@@ -1,13 +1,10 @@
 # Copyright (c) 2017, John Skinner
 import os
 import bson
-import typing
-import json
 import arvet.util.database_helpers as dh
 import arvet.util.dict_utils as du
 import arvet.util.trajectory_helpers as traj_help
 import arvet.util.unreal_transform as uetf
-import arvet.util.transform as tf
 import arvet.database.client
 import arvet.config.path_manager
 import arvet.core.image_source
@@ -25,6 +22,7 @@ import arvet_slam.benchmarks.trajectory_drift.trajectory_drift as traj_drift
 import arvet_slam.benchmarks.tracking.tracking_benchmark as tracking_benchmark
 import arvet.simulation.unrealcv.unrealcv_simulator as uecv_sim
 import arvet.simulation.controllers.trajectory_follow_controller as follow_cont
+import data_helpers
 
 
 class KITTIGeneratedDataExperiment(arvet.batch_analysis.experiment.Experiment):
@@ -283,19 +281,10 @@ class KITTIGeneratedDataExperiment(arvet.batch_analysis.experiment.Experiment):
         """
         # Save trajectory files for import into unreal
         for trajectory_group in self._trajectory_groups.values():
-            trajectory = traj_help.get_trajectory_for_image_source(db_client, trajectory_group.reference_dataset)
-            with open('unreal_trajectory_{0}.csv'.format(trajectory_group.name), 'w') as output_file:
-                output_file.write('Name,X,Y,Z,Roll,Pitch,Yaw\n')
-                for idx, timestamp in enumerate(sorted(trajectory.keys())):
-                    ue_pose = uetf.transform_to_unreal(trajectory[timestamp])
-                    output_file.write('{name},{x},{y},{z},{roll},{pitch},{yaw}\n'.format(
-                        name=idx,
-                        x=ue_pose.location[0],
-                        y=ue_pose.location[1],
-                        z=ue_pose.location[2],
-                        roll=ue_pose.euler[0],
-                        pitch=ue_pose.euler[1],
-                        yaw=ue_pose.euler[2]))
+            data_helpers.dump_ue4_trajectory(
+                name=trajectory_group.name,
+                trajectory=traj_help.get_trajectory_for_image_source(db_client, trajectory_group.reference_dataset)
+            )
 
         # Group and print the trajectories for graphing
         systems = du.defaults({'LIBVISO 2': self._libviso_system}, self._orbslam_systems)
@@ -305,38 +294,11 @@ class KITTIGeneratedDataExperiment(arvet.batch_analysis.experiment.Experiment):
             trial_results = {}
             for system_name, system_id in systems.items():
                 for dataset_name, dataset_id in trajectory_group.datasets.items():
-                    trial_result_id = self.get_trial_result(system_id, dataset_id)
-                    if trial_result_id is not None:
-                        label = "{0} on {1}".format(system_name, dataset_name)
+                    trial_result_list = self.get_trial_result(system_id, dataset_id)
+                    for idx, trial_result_id in enumerate(trial_result_list):
+                        label = "{0} on {1} repeat {2}".format(system_name, dataset_name, idx)
                         trial_results[label] = trial_result_id
-
-            # Make sure we have at least one result to plot
-            if len(trial_results) >= 1:
-                json_data = {}
-                added_ground_truth = False
-
-                # For each trial result
-                for label, trial_result_id in trial_results.items():
-                    trial_result = dh.load_object(db_client, db_client.trials_collection, trial_result_id)
-                    if trial_result is not None:
-                        if trial_result.success:
-                            if not added_ground_truth:
-                                added_ground_truth = True
-                                trajectory = trial_result.get_ground_truth_camera_poses()
-                                if len(trajectory) > 0:
-                                    first_pose = trajectory[min(trajectory.keys())]
-                                    json_data['ground_truth'] = [
-                                        [time] + location_to_json(first_pose.find_relative(pose))
-                                        for time, pose in trajectory.items()
-                                    ]
-                            trajectory = trial_result.get_computed_camera_poses()
-                            if len(trajectory) > 0:
-                                first_pose = trajectory[min(trajectory.keys())]
-                                json_data[label] = [[time] + location_to_json(first_pose.find_relative(pose))
-                                                    for time, pose in trajectory.items()]
-
-                with open('{0}.json'.format(trajectory_group.name), 'w') as json_file:
-                    json.dump(json_data, json_file)
+            data_helpers.export_trajectory_as_json(trial_results, "Generated Data " + trajectory_group.name, db_client)
 
     def serialize(self):
         serialized = super().serialize()
@@ -388,19 +350,6 @@ class KITTIGeneratedDataExperiment(arvet.batch_analysis.experiment.Experiment):
             kwargs['benchmark_tracking'] = serialized_representation['benchmark_tracking']
 
         return super().deserialize(serialized_representation, db_client, **kwargs)
-
-
-def location_to_json(pose: tf.Transform) -> typing.List[float]:
-    """
-    A simple helper to pull location from a transform and return it
-    :param pose: A Transform object
-    :return: The list of coordinates of it's location
-    """
-    return [
-        pose.location[0],
-        pose.location[1],
-        pose.location[2]
-    ]
 
 
 def update_schema(serialized: dict, db_client: arvet.database.client.DatabaseClient):

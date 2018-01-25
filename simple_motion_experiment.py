@@ -4,7 +4,6 @@ import os
 import bson
 import logging
 import numpy as np
-import json
 import arvet.util.database_helpers as dh
 import arvet.util.dict_utils as du
 import arvet.util.transform as tf
@@ -22,6 +21,7 @@ import arvet_slam.benchmarks.trajectory_drift.trajectory_drift as traj_drift
 import arvet_slam.benchmarks.tracking.tracking_benchmark as tracking_benchmark
 import arvet.simulation.unrealcv.unrealcv_simulator as uecv_sim
 import arvet.simulation.controllers.trajectory_follow_controller as follow_cont
+import data_helpers
 
 
 class SimpleMotionExperiment(arvet.batch_analysis.experiment.Experiment):
@@ -273,12 +273,13 @@ class SimpleMotionExperiment(arvet.batch_analysis.experiment.Experiment):
                         if trial_result.success:
                             if not added_ground_truth:
                                 trajectory = trial_result.get_ground_truth_camera_poses()
-                                lower, upper = plot_trajectory(ax, trajectory, 'ground truth trajectory', style='k--')
+                                lower, upper = data_helpers.plot_trajectory(ax, trajectory, 'ground truth trajectory',
+                                                                            style='k--')
                                 lowest = min(lowest, lower)
                                 highest = max(highest, upper)
                                 added_ground_truth = True
                             trajectory = trial_result.get_computed_camera_poses()
-                            lower, upper = plot_trajectory(ax, trajectory, label=label, style='-')
+                            lower, upper = data_helpers.plot_trajectory(ax, trajectory, label=label, style='-')
                             plot_forward(oax, trajectory, label=label, colors=[cmap(colour_index / 9, alpha=0.5)])
                             lowest = min(lowest, lower)
                             highest = max(highest, upper)
@@ -389,33 +390,7 @@ class SimpleMotionExperiment(arvet.batch_analysis.experiment.Experiment):
                         label = "{0} on {1} - repeat {2}".format(system_name, dataset_name, idx)
                         trial_results[label] = trial_result_list[idx]
 
-            # Make sure we have at least one result to plot
-            if len(trial_results) >= 1:
-                json_data = {}
-                added_ground_truth = False
-
-                # For each trial result
-                for label, trial_result_id in trial_results.items():
-                    trial_result = dh.load_object(db_client, db_client.trials_collection, trial_result_id)
-                    if trial_result is not None:
-                        if trial_result.success:
-                            if not added_ground_truth:
-                                added_ground_truth = True
-                                trajectory = trial_result.get_ground_truth_camera_poses()
-                                if len(trajectory) > 0:
-                                    first_pose = trajectory[min(trajectory.keys())]
-                                    json_data['ground_truth'] = [
-                                        [time] + location_to_json(first_pose.find_relative(pose))
-                                        for time, pose in trajectory.items()
-                                    ]
-                            trajectory = trial_result.get_computed_camera_poses()
-                            if len(trajectory) > 0:
-                                first_pose = trajectory[min(trajectory.keys())]
-                                json_data[label] = [[time] + location_to_json(first_pose.find_relative(pose))
-                                                    for time, pose in trajectory.items()]
-
-                with open('{0}.json'.format(trajectory_group.name), 'w') as json_file:
-                    json.dump(json_data, json_file)
+            data_helpers.export_trajectory_as_json(trial_results, "Simple Motion " + trajectory_group.name, db_client)
 
     def serialize(self):
         serialized = super().serialize()
@@ -469,42 +444,6 @@ class SimpleMotionExperiment(arvet.batch_analysis.experiment.Experiment):
         return super().deserialize(serialized_representation, db_client, **kwargs)
 
 
-def plot_trajectory(axis, trajectory, label, style='-'):
-    """
-    Simple helper to plot a trajectory on a 3D axis.
-    Will normalise the trajectory to start at (0,0,0) and facing down the x axis,
-    that is, all poses are relative to the first one.
-    :param axis: The axis on which to plot
-    :param trajectory: A map of timestamps to camera poses
-    :param label: The label for the series
-    :param style: The line style to use for the trajectory. Lets us distinguish virtual and real world results.
-    :return: The minimum and maximum coordinate values, for axis sizing.
-    """
-    x = []
-    y = []
-    z = []
-    max_point = 0
-    min_point = 0
-    times = sorted(trajectory.keys())
-    first_pose = None
-    for timestamp in times:
-        pose = trajectory[timestamp]
-        if first_pose is None:
-            first_pose = pose
-            x.append(0)
-            y.append(0)
-            z.append(0)
-        else:
-            pose = first_pose.find_relative(pose)
-            max_point = max(max_point, pose.location[0], pose.location[1], pose.location[2])
-            min_point = min(min_point, pose.location[0], pose.location[1], pose.location[2])
-            x.append(pose.location[0])
-            y.append(pose.location[1])
-            z.append(pose.location[2])
-    axis.plot(x, y, z, style, label=label, alpha=0.7)
-    return min_point, max_point
-
-
 def plot_forward(axis, trajectory, label, linestyles='solid', colors=None):
     x = []
     y = []
@@ -543,19 +482,6 @@ def plot_forward(axis, trajectory, label, linestyles='solid', colors=None):
                 w.append(forward[2])
     axis.quiver(x, y, z, u, v, w, linestyles=linestyles, colors=colors, normalize=True, label=label,
                 length=1)
-
-
-def location_to_json(pose: tf.Transform) -> typing.List[float]:
-    """
-    A simple helper to pull location from a transform and return it
-    :param pose: A Transform object
-    :return: The list of coordinates of it's location
-    """
-    return [
-        pose.location[0],
-        pose.location[1],
-        pose.location[2]
-    ]
 
 
 def update_schema(serialized: dict, db_client: arvet.database.client.DatabaseClient):
