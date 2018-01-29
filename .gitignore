@@ -106,4 +106,5 @@ jrs_auto_task*
 
 # Data dump output
 *.json
+*.csv
 
