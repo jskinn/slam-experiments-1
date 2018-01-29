@@ -216,7 +216,8 @@ def get_frieburg1_360():
         ('AIUE_V01_002', uetf.create_serialized((-990, -135, 315), (0, 0, 25))),
         ('AIUE_V01_003', uetf.create_serialized((-105, -335, 135), (0, 0, 110))),
         ('AIUE_V01_003', uetf.create_serialized((-70, 635, 135), (0, 0, -140))),
-
+        ('AIUE_V01_004', uetf.create_serialized((540, 70, 120), (0, 0, -45))),
+        ('AIUE_V01_004', uetf.create_serialized((540, 70, 470), (0, 0, -45))),
         ('AIUE_V01_005', uetf.create_serialized((-95, -695, 65), (0, 0, 150))),
         ('AIUE_V01_005', uetf.create_serialized((-795, -1490, 490), (0, 0, 180))),
     ]
