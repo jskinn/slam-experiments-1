@@ -41,6 +41,8 @@ class VerificationExperiment(arvet.batch_analysis.simple_experiment.SimpleExperi
         :param db_client:
         :return:
         """
+        import matplotlib.pyplot as pyplot
+
         # Visualize the different trajectories in each group
         for system_name, dataset_name, reference_filenames in self.get_reference():
             trial_result_list = self.get_trial_results(self.systems[system_name], self.datasets[dataset_name])
@@ -50,8 +52,42 @@ class VerificationExperiment(arvet.batch_analysis.simple_experiment.SimpleExperi
                 trial_result = dh.load_object(db_client, db_client.trials_collection, trial_result_id)
                 if trial_result is not None:
                     computed_trajectories.append(trial_result.get_computed_camera_poses())
-            plot_difference(reference_trajectories, computed_trajectories,
-                            '{0} on {1}'.format(system_name, dataset_name))
+
+            figure = pyplot.figure(figsize=(14, 10), dpi=80)
+            figure.suptitle("X axis movement for {0} on {1}".format(system_name, dataset_name))
+            ax = figure.add_subplot(131)
+            ax.set_title('x axis')
+            ax.set_xlabel('time')
+            ax.set_ylabel('position')
+            plot_axis(ax, reference_trajectories, computed_trajectories, lambda t: t.location[0])
+
+            ax = figure.add_subplot(132)
+            ax.set_title('y axis')
+            ax.set_xlabel('time')
+            ax.set_ylabel('position')
+            plot_axis(ax, reference_trajectories, computed_trajectories, lambda t: t.location[1])
+
+            ax = figure.add_subplot(133)
+            ax.set_title('z axis')
+            ax.set_xlabel('time')
+            ax.set_ylabel('position')
+            plot_axis(ax, reference_trajectories, computed_trajectories, lambda t: t.location[2])
+
+            # plot_difference(reference_trajectories, computed_trajectories,
+            #                 '{0} on {1}'.format(system_name, dataset_name))
+
+        pyplot.show()
+
+
+def plot_axis(ax, reference_trajectories: typing.List[typing.Mapping[float, tf.Transform]],
+              computed_trajectories: typing.List[typing.Mapping[float, tf.Transform]],
+              get_value: typing.Callable[[tf.Transform], float]) -> None:
+    for idx, traj in enumerate(reference_trajectories):
+        x = sorted(traj.keys())
+        ax.plot(x, [get_value(traj[t]) for t in x], 'b-', alpha=0.5, label="reference trajectory {0}".format(idx))
+    for idx, traj in enumerate(computed_trajectories):
+        x = sorted(traj.keys())
+        ax.plot(x, [get_value(traj[t]) for t in x], 'r-', alpha=0.5, label="computed trajectory {0}".format(idx))
 
 
 def plot_difference(reference_trajectories: typing.List[typing.Mapping[float, tf.Transform]],
@@ -59,18 +95,23 @@ def plot_difference(reference_trajectories: typing.List[typing.Mapping[float, tf
                     name: str) -> None:
     import matplotlib.pyplot as pyplot
 
+    ref_idx = 0
+    for idx in range(1, len(reference_trajectories)):
+        if len(reference_trajectories[idx]) > len(reference_trajectories[ref_idx]):
+            ref_idx = idx
+
     reference_keys = [{
         first_time: other_time
-        for first_time, other_time in ass.associate(reference_trajectories[0], reference_trajectories[idx],
+        for first_time, other_time in ass.associate(reference_trajectories[ref_idx], reference_trajectories[idx],
                                                     offset=0, max_difference=0.001)
     } for idx in range(len(reference_trajectories))]
     computed_keys = [{
         ref_time: comp_time
-        for ref_time, comp_time in ass.associate(reference_trajectories[0], computed_trajectories[idx],
+        for ref_time, comp_time in ass.associate(reference_trajectories[ref_idx], computed_trajectories[idx],
                                                  offset=0, max_difference=0.001)
     } for idx in range(len(computed_trajectories))]
 
-    times = sorted(reference_trajectories[0].keys())
+    times = sorted(reference_trajectories[ref_idx].keys())
     current_idx = -1
     x = []
     min_diffs = []
@@ -206,14 +247,16 @@ def create_aggregate_trajectory(trajectories: typing.List[typing.Mapping[float, 
     return location_mean_trajectory, location_std_trajectory, orientation_mean_trajectory, orientation_std_trajectory
 
 
-def load_ref_trajectory(filename: str) -> typing.Mapping[float, tf.Transform]:
+def load_ref_trajectory(filename: str, exchange_coordinates=True) -> typing.Mapping[float, tf.Transform]:
     trajectory = {}
-    coordinate_exchange = np.matrix([[0, 0, 1, 0],
-                                     [-1, 0, 0, 0],
-                                     [0, -1, 0, 0],
-                                     [0, 0, 0, 1]])
 
-    #coordinate_exchange = np.identity(4)
+    if exchange_coordinates:
+        coordinate_exchange = np.matrix([[0, 0, 1, 0],
+                                         [-1, 0, 0, 0],
+                                         [0, -1, 0, 0],
+                                         [0, 0, 0, 1]])
+    else:
+        coordinate_exchange = np.identity(4)
 
     first_stamp = None
     with open(filename, 'r') as trajectory_file:
