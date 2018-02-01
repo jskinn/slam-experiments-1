@@ -1,5 +1,6 @@
 # Copyright (c) 2017, John Skinner
 import typing
+import logging
 import numpy as np
 import arvet.util.database_helpers as dh
 import arvet.util.transform as tf
@@ -45,6 +46,13 @@ class VerificationExperiment(arvet.batch_analysis.simple_experiment.SimpleExperi
 
         # Visualize the different trajectories in each group
         for system_name, dataset_name, reference_filenames in self.get_reference():
+            if system_name not in self.systems:
+                logging.getLogger(__name__).warning("Missing system {0}".format(system_name))
+                continue
+            if dataset_name not in self.datasets:
+                logging.getLogger(__name__).warning("Missing dataset {0}".format(dataset_name))
+                continue
+
             trial_result_list = self.get_trial_results(self.systems[system_name], self.datasets[dataset_name])
             reference_trajectories = [load_ref_trajectory(filename) for filename in reference_filenames]
             computed_trajectories = []
@@ -55,23 +63,47 @@ class VerificationExperiment(arvet.batch_analysis.simple_experiment.SimpleExperi
 
             figure = pyplot.figure(figsize=(14, 10), dpi=80)
             figure.suptitle("X axis movement for {0} on {1}".format(system_name, dataset_name))
-            ax = figure.add_subplot(131)
+            ax = figure.add_subplot(241)
             ax.set_title('x axis')
             ax.set_xlabel('time')
             ax.set_ylabel('position')
             plot_axis(ax, reference_trajectories, computed_trajectories, lambda t: t.location[0])
 
-            ax = figure.add_subplot(132)
+            ax = figure.add_subplot(242)
             ax.set_title('y axis')
             ax.set_xlabel('time')
             ax.set_ylabel('position')
             plot_axis(ax, reference_trajectories, computed_trajectories, lambda t: t.location[1])
 
-            ax = figure.add_subplot(133)
+            ax = figure.add_subplot(243)
             ax.set_title('z axis')
             ax.set_xlabel('time')
             ax.set_ylabel('position')
             plot_axis(ax, reference_trajectories, computed_trajectories, lambda t: t.location[2])
+
+            ax = figure.add_subplot(245)
+            ax.set_title('w axis')
+            ax.set_xlabel('time')
+            ax.set_ylabel('orientation')
+            plot_axis(ax, reference_trajectories, computed_trajectories, lambda t: t.rotation_quat(True)[0])
+
+            ax = figure.add_subplot(246)
+            ax.set_title('x axis')
+            ax.set_xlabel('time')
+            ax.set_ylabel('orientation')
+            plot_axis(ax, reference_trajectories, computed_trajectories, lambda t: t.rotation_quat(True)[1])
+
+            ax = figure.add_subplot(247)
+            ax.set_title('y axis')
+            ax.set_xlabel('time')
+            ax.set_ylabel('orientation')
+            plot_axis(ax, reference_trajectories, computed_trajectories, lambda t: t.rotation_quat(True)[2])
+
+            ax = figure.add_subplot(248)
+            ax.set_title('z axis')
+            ax.set_xlabel('time')
+            ax.set_ylabel('orientation')
+            plot_axis(ax, reference_trajectories, computed_trajectories, lambda t: t.rotation_quat(True)[3])
 
             # plot_difference(reference_trajectories, computed_trajectories,
             #                 '{0} on {1}'.format(system_name, dataset_name))
@@ -87,7 +119,7 @@ def plot_axis(ax, reference_trajectories: typing.List[typing.Mapping[float, tf.T
         ax.plot(x, [get_value(traj[t]) for t in x], 'b-', alpha=0.5, label="reference trajectory {0}".format(idx))
     for idx, traj in enumerate(computed_trajectories):
         x = sorted(traj.keys())
-        ax.plot(x, [get_value(traj[t]) for t in x], 'r-', alpha=0.5, label="computed trajectory {0}".format(idx))
+        ax.plot([xi - x[0] for xi in x], [get_value(traj[t]) for t in x], 'r-', alpha=0.5, label="computed trajectory {0}".format(idx))
 
 
 def plot_difference(reference_trajectories: typing.List[typing.Mapping[float, tf.Transform]],
