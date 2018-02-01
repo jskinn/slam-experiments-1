@@ -42,7 +42,7 @@ class OrbslamTUMVerify(base_verify.VerificationExperiment):
         # Import TUM datasets without using the manager, it is unnecessary
         for folder in [
             'rgbd_dataset_freiburg1_xyz',
-            'rgbd_dataset_freiburg1_rpy'
+            'rgbd_dataset_freiburg1_desk'
         ]:
             self.import_dataset(
                 name="TUM {0}".format(folder),
@@ -103,10 +103,10 @@ class OrbslamTUMVerify(base_verify.VerificationExperiment):
             ('ORBSLAM2 rgbd', 'TUM rgbd_dataset_freiburg1_xyz',
              ['reference-trajectories/trajectory-TUM-rgbd_dataset_freiburg1_xyz-rgbd-{0}.txt'.format(idx)
               for idx in range(1, 11)]),
-            ('ORBSLAM2 monocular', 'TUM rgbd_dataset_freiburg1_rpy',
+            ('ORBSLAM2 monocular', 'TUM rgbd_dataset_freiburg1_desk',
              ['reference-trajectories/trajectory-TUM-rgbd_dataset_freiburg1_desk-mono-{0}.txt'.format(idx)
               for idx in range(1, 11)]),
-            ('ORBSLAM2 rgbd', 'TUM rgbd_dataset_freiburg1_rpy',
+            ('ORBSLAM2 rgbd', 'TUM rgbd_dataset_freiburg1_desk',
              ['reference-trajectories/trajectory-TUM-rgbd_dataset_freiburg1_desk-rgbd-{0}.txt'.format(idx)
               for idx in range(1, 11)])
         ]
