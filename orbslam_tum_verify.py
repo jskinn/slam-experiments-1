@@ -9,7 +9,7 @@ import arvet_slam.benchmarks.rpe.relative_pose_error as rpe
 import base_verify
 
 
-class OrbslamKITTIVerify(base_verify.VerificationExperiment):
+class OrbslamTUMVerify(base_verify.VerificationExperiment):
 
     def __init__(self, systems=None,
                  datasets=None,
@@ -38,14 +38,16 @@ class OrbslamKITTIVerify(base_verify.VerificationExperiment):
         :param db_client: The database client, for saving declared objects too small to need a task
         :return:
         """
-        # --------- KITTI DATASETS -----------
-        # import specific kitti datasets that we have reference results for
-        for sequence_num in {0}:
+        # --------- TUM DATASETS -----------
+        # Import TUM datasets without using the manager, it is unnecessary
+        for folder in [
+            'rgbd_dataset_freiburg1_xyz',
+            'rgbd_dataset_freiburg1_rpy'
+        ]:
             self.import_dataset(
-                name='KITTI {0:02}'.format(sequence_num),
-                module_name='arvet_slam.dataset.kitti.kitti_loader',
-                path=os.path.join('datasets', 'KITTI', 'dataset'),
-                additional_args={'sequence_number': sequence_num},
+                name="TUM {0}".format(folder),
+                module_name='arvet_slam.dataset.tum.tum_loader',
+                path=os.path.join('datasets', 'TUM', folder),
                 task_manager=task_manager,
                 path_manager=path_manager
             )
@@ -53,7 +55,7 @@ class OrbslamKITTIVerify(base_verify.VerificationExperiment):
         # --------- SYSTEMS -----------
         # ORBSLAM2 - Create 2 variants, with different procesing modes
         vocab_path = os.path.join('systems', 'ORBSLAM2', 'ORBvoc.txt')
-        for sensor_mode in {orbslam2.SensorMode.STEREO, orbslam2.SensorMode.MONOCULAR}:
+        for sensor_mode in {orbslam2.SensorMode.RGBD, orbslam2.SensorMode.MONOCULAR}:
             self.import_system(
                 name='ORBSLAM2 {mode}'.format(mode=sensor_mode.name.lower()),
                 db_client=db_client,
@@ -95,12 +97,16 @@ class OrbslamKITTIVerify(base_verify.VerificationExperiment):
         :return: A list of tuples (reference_filename, system_name, dataset_name)
         """
         return [
-            ('ORBSLAM2 monocular', 'KITTI 00', ['reference-trajectories/trajectory-KITTI-00-mono-{0}.txt'.format(idx)
-                                                for idx in range(1, 11)]),
-            ('ORBSLAM2 stereo', 'KITTI 00', ['reference-trajectories/trajectory-KITTI-00-stereo-{0}.txt'.format(idx)
-                                             for idx in range(1, 11)]),
-            ('ORBSLAM2 monocular', 'KITTI 03', ['reference-trajectories/trajectory-KITTI-03-mono-{0}.txt'.format(idx)
-                                                for idx in range(1, 11)]),
-            ('ORBSLAM2 stereo', 'KITTI 03', ['reference-trajectories/trajectory-KITTI-03-stereo-{0}.txt'.format(idx)
-                                             for idx in range(1, 11)])
+            ('ORBSLAM2 monocular', 'TUM freiburg1_xyz',
+             ['reference-trajectories/trajectory-TUM-rgbd_dataset_freiburg1_xyz-mono-{0}.txt'.format(idx)
+              for idx in range(1, 11)]),
+            ('ORBSLAM2 rgbd', 'KITTI 00',
+             ['reference-trajectories/trajectory-TUM-rgbd_dataset_freiburg1_xyz-rgbd-{0}.txt'.format(idx)
+              for idx in range(1, 11)]),
+            ('ORBSLAM2 monocular', 'TUM freiburg1_xyz',
+             ['reference-trajectories/trajectory-TUM-rgbd_dataset_freiburg1_desk-mono-{0}.txt'.format(idx)
+              for idx in range(1, 11)]),
+            ('ORBSLAM2 rgbd', 'KITTI 00',
+             ['reference-trajectories/trajectory-TUM-rgbd_dataset_freiburg1_desk-rgbd-{0}.txt'.format(idx)
+              for idx in range(1, 11)])
         ]
