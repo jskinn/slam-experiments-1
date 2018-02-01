@@ -40,7 +40,7 @@ class OrbslamKITTIVerify(base_verify.VerificationExperiment):
         """
         # --------- KITTI DATASETS -----------
         # import specific kitti datasets that we have reference results for
-        for sequence_num in {0}:
+        for sequence_num in {0, 3}:
             self.import_dataset(
                 name='KITTI {0:02}'.format(sequence_num),
                 module_name='arvet_slam.dataset.kitti.kitti_loader',
