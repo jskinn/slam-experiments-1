@@ -25,7 +25,7 @@ class OrbslamEuRoCVerify(base_verify.VerificationExperiment):
         :param enabled:
         :param id_:
         """
-        super().__init__(systems=systems, datasets=datasets, benchmarks=benchmarks,
+        super().__init__(systems=systems, datasets=datasets, benchmarks=benchmarks, repeats=10,
                          id_=id_, trial_map=trial_map, result_map=result_map, enabled=enabled)
 
     def do_imports(self, task_manager: arvet.batch_analysis.task_manager.TaskManager,
@@ -119,7 +119,7 @@ class OrbslamEuRoCVerify(base_verify.VerificationExperiment):
             ('ORBSLAM2 stereo', 'EuRoC MH_01_easy',
              ['reference-trajectories/trajectory-EuRoC-MH_01_easy-stereo-{0}.txt'.format(idx)
               for idx in range(1, 11)]),
-            ('ORBSLAM2 nonocular', 'EuRoC MH_04_difficult',
+            ('ORBSLAM2 monocular', 'EuRoC MH_04_difficult',
              ['reference-trajectories/trajectory-EuRoC-MH_04_difficult-mono-{0}.txt'.format(idx)
               for idx in range(1, 11)]),
             ('ORBSLAM2 stereo', 'EuRoC MH_04_difficult',

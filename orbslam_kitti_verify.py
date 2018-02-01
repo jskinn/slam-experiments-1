@@ -25,7 +25,7 @@ class OrbslamKITTIVerify(base_verify.VerificationExperiment):
         :param enabled:
         :param id_:
         """
-        super().__init__(systems=systems, datasets=datasets, benchmarks=benchmarks,
+        super().__init__(systems=systems, datasets=datasets, benchmarks=benchmarks, repeats=10,
                          id_=id_, trial_map=trial_map, result_map=result_map, enabled=enabled)
 
     def do_imports(self, task_manager: arvet.batch_analysis.task_manager.TaskManager,

@@ -13,7 +13,7 @@ class VerificationExperiment(arvet.batch_analysis.simple_experiment.SimpleExperi
 
     def __init__(self, systems=None,
                  datasets=None,
-                 benchmarks=None,
+                 benchmarks=None, repeats=1,
                  trial_map=None, result_map=None, enabled=True, id_=None):
         """
         Constructor. We need parameters to load the different stored parts of this experiment
@@ -25,7 +25,7 @@ class VerificationExperiment(arvet.batch_analysis.simple_experiment.SimpleExperi
         :param enabled:
         :param id_:
         """
-        super().__init__(systems=systems, datasets=datasets, benchmarks=benchmarks,
+        super().__init__(systems=systems, datasets=datasets, benchmarks=benchmarks, repeats=repeats,
                          id_=id_, trial_map=trial_map, result_map=result_map, enabled=enabled)
 
     def get_reference(self) -> typing.List[typing.Tuple[str, str, typing.List[str]]]:
@@ -70,38 +70,38 @@ def plot_difference(reference_trajectories: typing.List[typing.Mapping[float, tf
                                                  offset=0, max_difference=0.001)
     } for idx in range(len(computed_trajectories))]
 
-    x = list(reference_trajectories[0].keys())
+    times = sorted(reference_trajectories[0].keys())
+    current_idx = -1
+    x = []
     min_diffs = []
     max_diffs = []
     rot_min_diffs = []
     rot_max_diffs = []
-    for idx in range(len(x)):
+    for idx in range(len(times)):
+        found = False
         for ref_idx in range(len(reference_trajectories)):
             for comp_idx in range(len(computed_trajectories)):
-                ref_pose = reference_trajectories[ref_idx][reference_keys[x[idx]]]
-                comp_pose = computed_trajectories[comp_idx][computed_keys[x[idx]]]
+                if times[idx] not in reference_keys[ref_idx] or times[idx] not in computed_keys[comp_idx]:
+                    continue
+
+                ref_pose = reference_trajectories[ref_idx][reference_keys[ref_idx][times[idx]]]
+                comp_pose = computed_trajectories[comp_idx][computed_keys[comp_idx][times[idx]]]
                 diff = np.linalg.norm(ref_pose.location - comp_pose.location)
                 rot_diff = np.linalg.norm(ref_pose.rotation_quat(True) - comp_pose.rotation_quat(True))
 
-                if len(min_diffs) <= idx:
+                if not found:
+                    found = True
+                    current_idx += 1
+                    x.append(times[idx])
                     min_diffs.append(diff)
-                else:
-                    min_diffs[idx] = min(min_diffs[idx], diff)
-
-                if len(max_diffs) <= idx:
                     max_diffs.append(diff)
-                else:
-                    max_diffs[idx] = max(max_diffs[idx], diff)
-
-                if len(rot_min_diffs) <= idx:
                     rot_min_diffs.append(rot_diff)
-                else:
-                    rot_min_diffs[idx] = min(rot_min_diffs[idx], rot_diff)
-
-                if len(rot_max_diffs) <= idx:
                     rot_max_diffs.append(rot_diff)
                 else:
-                    rot_max_diffs[idx] = max(rot_max_diffs[idx], rot_diff)
+                    min_diffs[current_idx] = min(min_diffs[current_idx], diff)
+                    max_diffs[current_idx] = max(max_diffs[current_idx], diff)
+                    rot_min_diffs[current_idx] = min(rot_min_diffs[current_idx], rot_diff)
+                    rot_max_diffs[current_idx] = max(rot_max_diffs[current_idx], rot_diff)
 
     figure = pyplot.figure(figsize=(14, 10), dpi=80)
     figure.suptitle("Difference in trajectories for {0}".format(name))
@@ -212,6 +212,9 @@ def load_ref_trajectory(filename: str) -> typing.Mapping[float, tf.Transform]:
                                      [-1, 0, 0, 0],
                                      [0, -1, 0, 0],
                                      [0, 0, 0, 1]])
+
+    #coordinate_exchange = np.identity(4)
+
     first_stamp = None
     with open(filename, 'r') as trajectory_file:
         for line in trajectory_file:
