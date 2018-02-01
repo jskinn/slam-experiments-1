@@ -97,16 +97,16 @@ class OrbslamTUMVerify(base_verify.VerificationExperiment):
         :return: A list of tuples (reference_filename, system_name, dataset_name)
         """
         return [
-            ('ORBSLAM2 monocular', 'TUM freiburg1_xyz',
-             ['reference-trajectories/trajectory-TUM-rgbd_dataset_freiburg1_xyz-mono-{0}.txt'.format(idx)
+            ('ORBSLAM2 monocular', 'TUM rgbd_dataset_freiburg1_xyz',
+             ['reference-trajectories/trajectory-TUM-rgbd_dataset_frieburg1_xyz-mono-{0}.txt'.format(idx)
               for idx in range(1, 11)]),
-            ('ORBSLAM2 rgbd', 'KITTI 00',
+            ('ORBSLAM2 rgbd', 'TUM rgbd_dataset_freiburg1_xyz',
              ['reference-trajectories/trajectory-TUM-rgbd_dataset_freiburg1_xyz-rgbd-{0}.txt'.format(idx)
               for idx in range(1, 11)]),
-            ('ORBSLAM2 monocular', 'TUM freiburg1_xyz',
+            ('ORBSLAM2 monocular', 'TUM rgbd_dataset_freiburg1_rpy',
              ['reference-trajectories/trajectory-TUM-rgbd_dataset_freiburg1_desk-mono-{0}.txt'.format(idx)
               for idx in range(1, 11)]),
-            ('ORBSLAM2 rgbd', 'KITTI 00',
+            ('ORBSLAM2 rgbd', 'TUM rgbd_dataset_freiburg1_rpy',
              ['reference-trajectories/trajectory-TUM-rgbd_dataset_freiburg1_desk-rgbd-{0}.txt'.format(idx)
               for idx in range(1, 11)])
         ]
