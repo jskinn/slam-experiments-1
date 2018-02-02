@@ -65,7 +65,7 @@ class OrbslamTUMVerify(base_verify.VerificationExperiment):
                     settings={
                         'ThDepth': 35,
                         'ORBextractor': {
-                            'nFeatures': 2000,
+                            'nFeatures': 1000,
                             'scaleFactor': 1.2,
                             'nLevels': 8,
                             'iniThFAST': 20,
