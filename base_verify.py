@@ -103,7 +103,9 @@ class VerificationExperiment(arvet.batch_analysis.simple_experiment.SimpleExperi
             ax.set_title('z axis')
             ax.set_xlabel('time')
             ax.set_ylabel('orientation')
-            plot_axis(ax, reference_trajectories, computed_trajectories, lambda t: t.rotation_quat(True)[3])
+            ref_line, comp_line = plot_axis(ax, reference_trajectories, computed_trajectories, lambda t: t.rotation_quat(True)[3])
+
+            pyplot.figlegend([ref_line, comp_line], ['locally from example', 'through framework on HPC'], loc='upper right')
 
             # plot_difference(reference_trajectories, computed_trajectories,
             #                 '{0} on {1}'.format(system_name, dataset_name))
@@ -113,13 +115,16 @@ class VerificationExperiment(arvet.batch_analysis.simple_experiment.SimpleExperi
 
 def plot_axis(ax, reference_trajectories: typing.List[typing.Mapping[float, tf.Transform]],
               computed_trajectories: typing.List[typing.Mapping[float, tf.Transform]],
-              get_value: typing.Callable[[tf.Transform], float]) -> None:
+              get_value: typing.Callable[[tf.Transform], float]):
+    ref_line = None
+    comp_line = None
     for idx, traj in enumerate(reference_trajectories):
         x = sorted(traj.keys())
-        ax.plot(x, [get_value(traj[t]) for t in x], 'b-', alpha=0.5, label="reference trajectory {0}".format(idx))
+        ref_line = ax.plot(x, [get_value(traj[t]) for t in x], 'b-', alpha=0.5, label="reference trajectory {0}".format(idx))
     for idx, traj in enumerate(computed_trajectories):
         x = sorted(traj.keys())
-        ax.plot([xi - x[0] for xi in x], [get_value(traj[t]) for t in x], 'r-', alpha=0.5, label="computed trajectory {0}".format(idx))
+        comp_line = ax.plot([xi - x[0] for xi in x], [get_value(traj[t]) for t in x], 'r-', alpha=0.5, label="computed trajectory {0}".format(idx))
+    return ref_line[0], comp_line[0]
 
 
 def plot_difference(reference_trajectories: typing.List[typing.Mapping[float, tf.Transform]],
