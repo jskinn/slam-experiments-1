@@ -394,9 +394,16 @@ class TrajectoryGroup:
                         'stereo_offset': reference_dataset.get_stereo_baseline() \
                         if reference_dataset.is_stereo_available else 0,
                         'provide_rgb': True,
-                        'provide_depth': reference_dataset.is_depth_available,
+                        'provide_ground_truth_depth': False,    # We don't care about this
                         'provide_labels': reference_dataset.is_labels_available,
                         'provide_world_normals': reference_dataset.is_normals_available,
+
+                        # Depth settings
+                        'provide_depth': reference_dataset.is_depth_available,
+                        'depth_offset': reference_dataset.get_stereo_baseline() \
+                        if reference_dataset.is_depth_available else 0,
+                        'projector_offset': reference_dataset.get_stereo_baseline() \
+                        if reference_dataset.is_depth_available else 0,
 
                         # Simulator camera settings, be similar to the reference dataset
                         'resolution': {'width': intrinsics.width, 'height': intrinsics.height},
@@ -461,9 +468,7 @@ class TrajectoryGroup:
             name=serialized_representation['name'],
             reference_id=serialized_representation['reference_id'],
             mappings=serialized_representation['mappings'],
-            quality_variations=serialized_representation['quality_variations'],
             baseline_configuration=serialized_representation['baseline_configuration'],
-            simulators={name: tuple(data) for name, data in serialized_representation['simulators'].items()},
             controller_id=serialized_representation['controller_id'],
             generated_datasets=serialized_representation['generated_datasets']
         )
