@@ -170,7 +170,9 @@ class OrbslamConsistencyExperiment(arvet.batch_analysis.simple_experiment.Simple
 
             # Collect statistics on all the trajectories
             times = []
-            trans_precision = []
+            variance = []
+            rot_variance = []
+            time_variance = []
             trans_error = []
             distances = []
             distances_to_prev_frame = []
@@ -200,10 +202,21 @@ class OrbslamConsistencyExperiment(arvet.batch_analysis.simple_experiment.Simple
                 prev_location = None
                 total_distance = 0
                 for time in sorted(ground_truth_traj.keys()):
+                    if sum(1 for idx in range(len(timestamps)) if time in timestamps[idx]) <= 1:
+                        # Skip locations/results which appear in only one trajectory
+                        continue
+
                     # Find the mean estimated location for this time
-                    mean_estimate = np.median([computed_trajectories[idx][timestamps[idx][time]].location
-                                               for idx in range(len(computed_trajectories))
-                                               if time in timestamps[idx]], axis=0)
+                    mean_estimate = np.mean([computed_trajectories[idx][timestamps[idx][time]].location
+                                             for idx in range(len(computed_trajectories))
+                                             if time in timestamps[idx]], axis=0)
+
+                    mean_time = np.mean([timestamps[idx][time] for idx in range(len(computed_trajectories))
+                                         if time in timestamps[idx]])
+
+                    mean_orientation = quat_mean([computed_trajectories[idx][timestamps[idx][time]].rotation_quat(True)
+                                                  for idx in range(len(computed_trajectories))
+                                                  if time in timestamps[idx]])
 
                     # Find the distance to the prev frame
                     current_location = ground_truth_traj[time].location
@@ -219,54 +232,57 @@ class OrbslamConsistencyExperiment(arvet.batch_analysis.simple_experiment.Simple
                         if time in timestamps[idx]:
                             computed_location = computed_trajectories[idx][timestamps[idx][time]].location
                             times.append(time)
-                            trans_precision.append(np.linalg.norm(mean_estimate - computed_location))
+                            variance.append(np.dot(mean_estimate - computed_location,
+                                                   mean_estimate - computed_location))
+                            rot_variance.append(
+                                quat_diff(mean_orientation,
+                                          computed_trajectories[idx][timestamps[idx][time]].rotation_quat(True))**2
+                            )
+                            time_variance.append((mean_time - timestamps[idx][time]) *
+                                                 (mean_time - timestamps[idx][time]))
                             trans_error.append(np.linalg.norm(current_location - computed_location))
                             distances.append(total_distance)
                             distances_to_prev_frame.append(to_prev_frame)
                             normalized_points.append(computed_location - mean_estimate)
 
             # Plot precision vs error
-            figure = pyplot.figure(figsize=(14, 10), dpi=80)
-            figure.suptitle("{0} precision vs error".format(system_name))
-            ax = figure.add_subplot(111)
-            ax.set_xlabel('error')
-            ax.set_ylabel('absolute deviation')
-            ax.plot(trans_error, trans_precision, 'o', alpha=0.5, markersize=1)
-
-            # Plot precision vs frame distance
-            figure = pyplot.figure(figsize=(14, 10), dpi=80)
-            figure.suptitle("{0} precision vs frame distance".format(system_name))
-            ax = figure.add_subplot(111)
-            ax.set_xlabel('distance to previous frame')
-            ax.set_ylabel('absolute deviation')
-            ax.plot(distances_to_prev_frame, trans_precision, 'o', alpha=0.5, markersize=1)
-
-            # Plot precision vs total distance
-            figure = pyplot.figure(figsize=(14, 10), dpi=80)
-            figure.suptitle("{0} precision vs total distance".format(system_name))
-            ax = figure.add_subplot(111)
-            ax.set_xlabel('total distance travelled')
-            ax.set_ylabel('absolute deviation')
-            ax.plot(distances, trans_precision, 'o', alpha=0.5, markersize=1)
+            # figure = pyplot.figure(figsize=(14, 10), dpi=80)
+            # figure.suptitle("{0} precision vs error".format(system_name))
+            # ax = figure.add_subplot(111)
+            # ax.set_xlabel('error')
+            # ax.set_ylabel('absolute deviation')
+            # ax.plot(trans_error, trans_precision, 'o', alpha=0.5, markersize=1)
 
             # Histogram the distribution around the mean estimated
             figure = pyplot.figure(figsize=(14, 10), dpi=80)
-            figure.suptitle("{0} distribution of variation".format(system_name))
+            figure.suptitle("{0} location variance".format(system_name))
             ax = figure.add_subplot(111)
             ax.set_xlabel('meters')
             ax.set_ylabel('frequency')
-            normalized_points = np.asarray(normalized_points)
-            std = np.std(normalized_points[:, 0])
-            ax.hist(normalized_points[:, 0], 100, range=(-4 * std, 4*std), label='x', alpha=0.5)
-            std = np.std(normalized_points[:, 1])
-            ax.hist(normalized_points[:, 1], 100, range=(-4 * std, 4*std), label='y', alpha=0.5)
-            std = np.std(normalized_points[:, 2])
-            ax.hist(normalized_points[:, 2], 100, range=(-4 * std, 4*std), label='z', alpha=0.5)
-            ax.legend()
+            # std = np.std(trans_precision)
+            ax.hist(variance, 100, label='distance')
+
+            figure = pyplot.figure(figsize=(14, 10), dpi=80)
+            figure.suptitle("{0} distribution of time variance".format(system_name))
+            ax = figure.add_subplot(111)
+            ax.set_xlabel('seconds')
+            ax.set_ylabel('frequency')
+            # std = np.std(trans_precision)
+            ax.hist(time_variance, 100, label='time')
+
+            figure = pyplot.figure(figsize=(14, 10), dpi=80)
+            figure.suptitle("{0} distribution of rotational variance".format(system_name))
+            ax = figure.add_subplot(111)
+            ax.set_xlabel('radians')
+            ax.set_ylabel('frequency')
+            # std = np.std(trans_precision)
+            ax.hist(rot_variance, 100, label='angle')
 
             pyplot.tight_layout()
             pyplot.subplots_adjust(top=0.95, right=0.99)
-            pyplot.show()
+
+        # Show all the graphs
+        pyplot.show()
 
     def export_data(self, db_client: arvet.database.client.DatabaseClient):
         """
@@ -285,3 +301,35 @@ class OrbslamConsistencyExperiment(arvet.batch_analysis.simple_experiment.Simple
                     label = "{0} on {1} repeat {2}".format(system_name, dataset_name, idx)
                     trial_results[label] = trial_result_id
             data_helpers.export_trajectory_as_json(trial_results, "Consistency " + dataset_name, db_client)
+
+
+def quat_mean(quaternions):
+    """
+    Find the mean of a bunch of quaternions
+    :param quaternions:
+    :return:
+    """
+    if len(quaternions) <= 0:
+        return np.nan
+    q_mat = np.asarray(quaternions)
+    product = np.dot(q_mat.T, q_mat)
+    evals, evecs = np.linalg.eig(product)
+    best = -1
+    result = None
+    for idx in range(len(evals)):
+        if evals[idx] > best:
+            best = evals[idx]
+            result = evecs[idx]
+    return result
+
+
+def quat_diff(q1, q2):
+    """
+    Find the angle between two quaternions
+    Basically, we compose them, and derive the angle from the composition
+    :param q1:
+    :param q2:
+    :return:
+    """
+    z0 = q1[0] * q2[0] - q1[1] * q2[1] - q1[2] * q2[2] - q1[3] * q2[3]
+    return 2 * np.arccos(min(1, max(-1, z0)))
