@@ -4,6 +4,8 @@ import orbslam_kitti_verify
 import orbslam_euroc_verify
 import orbslam_tum_verify
 import orbslam_consistency_experiment
+import euroc_generated_data_experiment
+import tum_generated_data_experiment
 
 
 def main():
@@ -18,6 +20,8 @@ def main():
     arvet.create_experiment.create_experiment(orbslam_consistency_experiment.OrbslamConsistencyExperiment)
 
     # Synthetic data experiments
+    arvet.create_experiment.create_experiment(euroc_generated_data_experiment.EurocGeneratedDataExperiment)
+    arvet.create_experiment.create_experiment(tum_generated_data_experiment.TUMGeneratedDataExperiment)
 
 
 if __name__ == '__main__':
