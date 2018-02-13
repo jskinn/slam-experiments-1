@@ -1,5 +1,4 @@
 # Copyright (c) 2017, John Skinner
-import typing
 import os
 import logging
 import numpy as np
@@ -11,10 +10,6 @@ import arvet.batch_analysis.simple_experiment
 import arvet.batch_analysis.task_manager
 import arvet_slam.systems.slam.orbslam2 as orbslam2
 import arvet_slam.dataset.tum.tum_manager
-import arvet_slam.benchmarks.rpe.relative_pose_error as rpe
-import arvet_slam.benchmarks.ate.absolute_trajectory_error as ate
-import arvet_slam.benchmarks.trajectory_drift.trajectory_drift as traj_drift
-import arvet_slam.benchmarks.tracking.tracking_benchmark as tracking_benchmark
 import data_helpers
 
 
@@ -104,44 +99,6 @@ class OrbslamConsistencyExperiment(arvet.batch_analysis.simple_experiment.Simple
                     settings={'ORBextractor': {'nFeatures': 1500}}
                 )
             )
-
-        # --------- BENCHMARKS -----------
-        # Create and store the benchmarks for camera trajectories
-        # Just using the default settings for now
-        self.import_benchmark(
-            name='Relative Pose Error',
-            db_client=db_client,
-            benchmark=rpe.BenchmarkRPE(
-                max_pairs=10000,
-                fixed_delta=False,
-                delta=1.0,
-                delta_unit='s',
-                offset=0,
-                scale_=1
-            )
-        )
-        self.import_benchmark(
-            name='Absolute Trajectory Error',
-            db_client=db_client,
-            benchmark=ate.BenchmarkATE(
-                offset=0,
-                max_difference=0.2,
-                scale=1
-            )
-        )
-        self.import_benchmark(
-            name='Trajectory Drift',
-            db_client=db_client,
-            benchmark=traj_drift.BenchmarkTrajectoryDrift(
-                segment_lengths=[100, 200, 300, 400, 500, 600, 700, 800],
-                step_size=10
-            )
-        )
-        self.import_benchmark(
-            name='Tracking Statistics',
-            db_client=db_client,
-            benchmark=tracking_benchmark.TrackingBenchmark(initializing_is_lost=True)
-        )
 
     def plot_results(self, db_client: arvet.database.client.DatabaseClient):
         """

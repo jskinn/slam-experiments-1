@@ -15,10 +15,6 @@ import arvet.batch_analysis.experiment
 import arvet.batch_analysis.task_manager
 import arvet_slam.systems.visual_odometry.libviso2.libviso2 as libviso2
 import arvet_slam.systems.slam.orbslam2 as orbslam2
-import arvet_slam.benchmarks.rpe.relative_pose_error as rpe
-import arvet_slam.benchmarks.ate.absolute_trajectory_error as ate
-import arvet_slam.benchmarks.trajectory_drift.trajectory_drift as traj_drift
-import arvet_slam.benchmarks.tracking.tracking_benchmark as tracking_benchmark
 import arvet.simulation.unrealcv.unrealcv_simulator as uecv_sim
 import arvet.simulation.controllers.trajectory_follow_controller as follow_cont
 import data_helpers
@@ -138,37 +134,6 @@ class SimpleMotionExperiment(arvet.batch_analysis.experiment.Experiment):
                 ))
                 self._orbslam_systems[name] = orbslam_id
                 self._set_property('orbslam_systems.{}'.format(name), orbslam_id)
-
-        # --------- BENCHMARKS -----------
-        # Create and store the benchmarks for camera trajectories
-        # Just using the default settings for now
-        if self._benchmark_rpe is None:
-            self._benchmark_rpe = dh.add_unique(db_client.benchmarks_collection, rpe.BenchmarkRPE(
-                max_pairs=10000,
-                fixed_delta=False,
-                delta=1.0,
-                delta_unit='s',
-                offset=0,
-                scale_=1))
-            self._set_property('benchmark_rpe', self._benchmark_rpe)
-        if self._benchmark_ate is None:
-            self._benchmark_ate = dh.add_unique(db_client.benchmarks_collection, ate.BenchmarkATE(
-                offset=0,
-                max_difference=0.2,
-                scale=1))
-            self._set_property('benchmark_ate', self._benchmark_ate)
-        if self._benchmark_trajectory_drift is None:
-            self._benchmark_trajectory_drift = dh.add_unique(
-                db_client.benchmarks_collection,
-                traj_drift.BenchmarkTrajectoryDrift(
-                    segment_lengths=[100, 200, 300, 400, 500, 600, 700, 800],
-                    step_size=10
-                ))
-            self._set_property('benchmark_trajectory_drift', self._benchmark_trajectory_drift)
-        if self._benchmark_tracking is None:
-            self._benchmark_tracking = dh.add_unique(db_client.benchmarks_collection,
-                                                     tracking_benchmark.TrackingBenchmark(initializing_is_lost=True))
-            self._set_property('benchmark_tracking', self._benchmark_tracking)
 
     def schedule_tasks(self, task_manager: arvet.batch_analysis.task_manager.TaskManager,
                        db_client: arvet.database.client.DatabaseClient):

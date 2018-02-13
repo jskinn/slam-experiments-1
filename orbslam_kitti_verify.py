@@ -5,7 +5,6 @@ import arvet.database.client
 import arvet.config.path_manager
 import arvet.batch_analysis.task_manager
 import arvet_slam.systems.slam.orbslam2 as orbslam2
-import arvet_slam.benchmarks.rpe.relative_pose_error as rpe
 import base_verify
 
 
@@ -72,22 +71,6 @@ class OrbslamKITTIVerify(base_verify.VerificationExperiment):
                     }
                 )
             )
-
-        # --------- BENCHMARKS -----------
-        # Create and store the benchmarks for camera trajectories
-        # Just using the default settings for now
-        self.import_benchmark(
-            name='Relative Pose Error',
-            db_client=db_client,
-            benchmark=rpe.BenchmarkRPE(
-                max_pairs=10000,
-                fixed_delta=False,
-                delta=1.0,
-                delta_unit='s',
-                offset=0,
-                scale_=1
-            )
-        )
 
     def get_reference(self) -> typing.List[typing.Tuple[str, str, typing.List[str], typing.List[str]]]:
         """
