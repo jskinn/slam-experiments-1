@@ -1,6 +1,7 @@
 import typing
 import json
 import bson
+import numpy as np
 import arvet.util.database_helpers as dh
 import arvet.util.unreal_transform as uetf
 import arvet.util.transform as tf
@@ -42,6 +43,60 @@ def plot_trajectory(axis, trajectory: typing.Mapping[float, tf.Transform], label
             z.append(pose.location[2])
     axis.plot(x, y, z, style, label=label, alpha=0.7)
     return min_point, max_point
+
+
+def plot_component(ax, trajectories: typing.List[typing.Mapping[float, tf.Transform]],
+                   get_value: typing.Callable[[tf.Transform], float], style: str = '-', label=''):
+    """
+    Plot a particular trajectory component over time on an axis for a number of trajectories
+    :param ax: The axis on which to plot
+    :param trajectories: The list of trajectories to plot
+    :param get_value: A getter to retrieve the y value from the Transform object
+    :param style: The style of the lines for these components
+    :param label: The label
+    :return:
+    """
+    line = None
+    for idx, traj in enumerate(trajectories):
+        x = sorted(traj.keys())
+        line = ax.plot(x, [get_value(traj[t]) for t in x], style, alpha=0.25, label="{0} {1}".format(label, idx))[0]
+    return line
+
+
+def create_axis_plot(title: str, trajectory_groups: typing.List[
+                         typing.Tuple[str, typing.List[typing.Mapping[float, tf.Transform]], str]
+                     ]):
+    """
+    Create a plot of location and rotation coordinate values as a function time.
+    This is useful for checking if different trajectories are the same
+    :param system_name: The name of the system, for the plot title
+    :param dataset_name: The dataset name, for the plot title
+    :param trajectory_groups: A list of tuples, each containing a name, a list of trajectories, and a plot style
+    :return:
+    """
+    import matplotlib.pyplot as pyplot
+    figure = pyplot.figure(figsize=(14, 10), dpi=80)
+    figure.suptitle(title)
+    legend_labels = []
+    legend_lines = {}
+    for idx, (title, units, get_value) in enumerate([
+        ('x axis', 'meters', lambda t: t.location[0]),
+        ('y axis', 'meters', lambda t: t.location[1]),
+        ('z axis', 'meters', lambda t: t.location[2]),
+        ('roll', 'degrees', lambda t: 180 * t.euler[0] / np.pi),
+        ('pitch', 'degrees', lambda t: 180 * t.euler[1] / np.pi),
+        ('yaw', 'degrees', lambda t: 180 * t.euler[2] / np.pi)
+    ]):
+        ax = figure.add_subplot(231 + idx)
+        ax.set_title(title)
+        ax.set_xlabel('time')
+        ax.set_ylabel(units)
+        for label, traj_group, style in trajectory_groups:
+            line = plot_component(ax, traj_group, get_value, style=style)
+            if label not in legend_lines and line is not None:
+                legend_lines[label] = line
+                legend_labels.append(label)
+    pyplot.figlegend([legend_lines[label] for label in legend_labels], legend_labels, loc='upper right')
 
 
 def export_trajectory_as_json(trial_results: typing.Mapping[str, bson.ObjectId], filename: str,

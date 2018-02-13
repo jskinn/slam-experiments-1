@@ -8,6 +8,7 @@ import arvet.util.transform as tf
 import arvet.database.client
 import arvet.batch_analysis.simple_experiment
 import arvet.batch_analysis.task_manager
+import data_helpers
 
 
 class VerificationExperiment(arvet.batch_analysis.simple_experiment.SimpleExperiment):
@@ -64,42 +65,12 @@ class VerificationExperiment(arvet.batch_analysis.simple_experiment.SimpleExperi
                 if trial_result is not None:
                     computed_trajectories.append(trial_result.get_computed_camera_poses())
 
-            figure = pyplot.figure(figsize=(14, 10), dpi=80)
-            figure.suptitle("Trajectory for {0} on {1}".format(system_name, dataset_name))
-            legend_labels = []
-            legend_lines = {}
-            for idx, (title, units, get_value) in enumerate([
-                ('x axis', 'meters', lambda t: t.location[0]),
-                ('y axis', 'meters', lambda t: t.location[1]),
-                ('z axis', 'meters', lambda t: t.location[2]),
-                ('roll', 'degrees', lambda t: 180 * t.euler[0] / np.pi),
-                ('pitch', 'degrees', lambda t: 180 * t.euler[1] / np.pi),
-                ('yaw', 'degrees', lambda t: 180 * t.euler[2] / np.pi)
-            ]):
-                ax = figure.add_subplot(231 + idx)
-                ax.set_title(title)
-                ax.set_xlabel('time')
-                ax.set_ylabel(units)
-                for label, traj_group, style in [
-                    ('locally from example', reference_trajectories, 'b-'),
-                    ('through framework on HPC', computed_trajectories, 'r--'),
-                    ('locally without delays', extra_trajectories, 'g--')
-                ]:
-                    line = plot_axis(ax, traj_group, get_value, style=style)
-                    if label not in legend_lines and line is not None:
-                        legend_lines[label] = line
-                        legend_labels.append(label)
-            pyplot.figlegend([legend_lines[label] for label in legend_labels], legend_labels, loc='upper right')
+            data_helpers.create_axis_plot("Trajectory for {0} on {1}".format(system_name, dataset_name), [
+                ('locally from example', reference_trajectories, 'b-'),
+                ('through framework on HPC', computed_trajectories, 'r--'),
+                ('locally without delays', extra_trajectories, 'g--')
+            ])
         pyplot.show()
-
-
-def plot_axis(ax, trajectories: typing.List[typing.Mapping[float, tf.Transform]],
-              get_value: typing.Callable[[tf.Transform], float], style: str = '-', label=''):
-    line = None
-    for idx, traj in enumerate(trajectories):
-        x = sorted(traj.keys())
-        line = ax.plot(x, [get_value(traj[t]) for t in x], style, alpha=0.25, label="{0} {1}".format(label, idx))[0]
-    return line
 
 
 def load_ref_trajectory(filename: str, exchange_coordinates=True) -> typing.Mapping[float, tf.Transform]:

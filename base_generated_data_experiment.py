@@ -20,8 +20,7 @@ import arvet.simulation.controllers.trajectory_follow_controller as follow_cont
 import data_helpers
 
 
-class GeneratedDataExperiment(arvet.batch_analysis.experiment.Experiment,
-                              metaclass=arvet.database.entity.AbstractEntityMetaclass):
+class GeneratedDataExperiment(arvet.batch_analysis.experiment.Experiment):
 
     def __init__(self, systems=None,
                  simulators=None,
@@ -60,7 +59,7 @@ class GeneratedDataExperiment(arvet.batch_analysis.experiment.Experiment,
 
     @property
     def trajectory_groups(self) -> typing.Mapping[str, 'TrajectoryGroup']:
-        return self._datasets
+        return self._trajectory_groups
 
     @property
     def benchmarks(self) -> typing.Mapping[str, bson.ObjectId]:
@@ -241,6 +240,49 @@ class GeneratedDataExperiment(arvet.batch_analysis.experiment.Experiment,
             if save_changes:
                 self._set_property('trajectory_groups.{0}'.format(trajectory_group.name), trajectory_group.serialize())
 
+    def plot_results(self, db_client: arvet.database.client.DatabaseClient):
+        """
+        Plot the results for this experiment.
+        :param db_client:
+        :return:
+        """
+        import matplotlib.pyplot as pyplot
+
+        # Group and print the trajectories for graphing
+        for trajectory_group in self.trajectory_groups.values():
+
+            # Collect the trial results for each image source in this group
+            plot_groups = []
+            ground_truth_trajectory = None
+            for system_name, system_id in self.systems.items():
+                # Real world trajectory
+                computed_trajectories = []
+                trial_result_list = self.get_trial_results(system_id, trajectory_group.reference_dataset)
+                for trial_result_id in trial_result_list:
+                    trial_result = dh.load_object(db_client, db_client.trials_collection, trial_result_id)
+                    if trial_result is not None:
+                        computed_trajectories.append(trial_result.get_computed_camera_poses())
+                        if ground_truth_trajectory is None:
+                            ground_truth_trajectory = trial_result.get_ground_truth_camera_poses()
+                plot_groups.append(('Real world dataset', computed_trajectories, 'b-'))
+
+                # Synthetic data trajectories
+                for dataset_name, dataset_id in trajectory_group.generated_datasets.items():
+                    computed_trajectories = []
+                    trial_result_list = self.get_trial_results(system_id, dataset_id)
+                    for trial_result_id in trial_result_list:
+                        trial_result = dh.load_object(db_client, db_client.trials_collection, trial_result_id)
+                        if trial_result is not None:
+                            computed_trajectories.append(trial_result.get_computed_camera_poses())
+                            if ground_truth_trajectory is None:
+                                ground_truth_trajectory = trial_result.get_ground_truth_camera_poses()
+                    plot_groups.append((dataset_name, computed_trajectories, '--'))
+            if ground_truth_trajectory is not None:
+                plot_groups.append(('Ground truth', [ground_truth_trajectory], 'k-'))
+
+            data_helpers.create_axis_plot("Trajectories for {0}".format(trajectory_group.name), plot_groups)
+        pyplot.show()
+
     def export_data(self, db_client: arvet.database.client.DatabaseClient):
         """
         Allow experiments to export some data, usually to file.
@@ -305,7 +347,7 @@ class GeneratedDataExperiment(arvet.batch_analysis.experiment.Experiment,
 
         # Benchmarks
         if 'benchmarks' in serialized_representation:
-            kwargs['benchmark_rpe'] = serialized_representation['benchmark_rpe']
+            kwargs['benchmarks'] = serialized_representation['benchmarks']
 
         return super().deserialize(serialized_representation, db_client, **kwargs)
 
