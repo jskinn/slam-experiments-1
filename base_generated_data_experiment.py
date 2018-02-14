@@ -76,7 +76,7 @@ class GeneratedDataExperiment(arvet.batch_analysis.experiment.Experiment):
         :return:
         """
         for trajectory_group in self.trajectory_groups.values():
-            self._update_trajectory_group(trajectory_group, task_manager, db_client)
+            self.update_trajectory_group(trajectory_group, task_manager, db_client)
 
     def schedule_tasks(self, task_manager: arvet.batch_analysis.task_manager.TaskManager,
                        db_client: arvet.database.client.DatabaseClient):
@@ -477,7 +477,7 @@ class TrajectoryGroup:
                     generate_dataset_task = task_manager.get_generate_dataset_task(
                         controller_id=self.follow_controller_id,
                         simulator_id=simulators[sim_name],
-                        simulator_config=du.defaults({}, config, self.baseline_configuration),
+                        simulator_config=du.defaults({'origin': origin}, config, self.baseline_configuration),
                         num_cpus=1,
                         num_gpus=0,
                         memory_requirements='3GB',
