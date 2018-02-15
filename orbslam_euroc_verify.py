@@ -97,19 +97,19 @@ class OrbslamEuRoCVerify(base_verify.VerificationExperiment):
         """
         return [
             ('ORBSLAM2 monocular', 'EuRoC MH_01_easy',
-             ['reference-trajectories/trajectory-EuRoC-MH_01_easy-mono-{0}.txt'.format(idx)
+             ['orbslam-trajectories/trajectory-EuRoC-MH_01_easy-mono-{0}.txt'.format(idx)
               for idx in range(1, 11)],
              ['fast-trajectories/trajectory-EuRoC-MH_01_easy-mono-fast-{0}.txt'.format(idx) for idx in range(1, 11)]),
             ('ORBSLAM2 stereo', 'EuRoC MH_01_easy',
-             ['reference-trajectories/trajectory-EuRoC-MH_01_easy-stereo-{0}.txt'.format(idx)
+             ['orbslam-trajectories/trajectory-EuRoC-MH_01_easy-stereo-{0}.txt'.format(idx)
               for idx in range(1, 11)],
              ['fast-trajectories/trajectory-EuRoC-MH_01_easy-stereo-fast-{0}.txt'.format(idx) for idx in range(1, 11)]),
             ('ORBSLAM2 monocular', 'EuRoC MH_04_difficult',
-             ['reference-trajectories/trajectory-EuRoC-MH_04_difficult-mono-{0}.txt'.format(idx)
+             ['orbslam-trajectories/trajectory-EuRoC-MH_04_difficult-mono-{0}.txt'.format(idx)
               for idx in range(1, 11)],
              ['fast-trajectories/trajectory-EuRoC-MH_04_difficult-mono-fast-{0}.txt'.format(idx) for idx in range(1, 11)]),
             ('ORBSLAM2 stereo', 'EuRoC MH_04_difficult',
-             ['reference-trajectories/trajectory-EuRoC-MH_04_difficult-stereo-{0}.txt'.format(idx)
+             ['orbslam-trajectories/trajectory-EuRoC-MH_04_difficult-stereo-{0}.txt'.format(idx)
               for idx in range(1, 11)],
              ['fast-trajectories/trajectory-EuRoC-MH_04_difficult-stereo-fast-{0}.txt'.format(idx) for idx in range(1, 11)])
         ]

@@ -79,15 +79,15 @@ class OrbslamKITTIVerify(base_verify.VerificationExperiment):
         """
         return [
             ('ORBSLAM2 monocular', 'KITTI 00',
-             ['reference-trajectories/trajectory-KITTI-00-mono-{0}.txt'.format(idx) for idx in range(1, 11)],
+             ['orbslam-trajectories/trajectory-KITTI-00-mono-{0}.txt'.format(idx) for idx in range(1, 11)],
              ['fast-trajectories/trajectory-KITTI-00-mono-fast-{0}.txt'.format(idx) for idx in range(1, 11)]),
             ('ORBSLAM2 stereo', 'KITTI 00',
-             ['reference-trajectories/trajectory-KITTI-00-stereo-{0}.txt'.format(idx) for idx in range(1, 11)],
+             ['orbslam-trajectories/trajectory-KITTI-00-stereo-{0}.txt'.format(idx) for idx in range(1, 11)],
              ['fast-trajectories/trajectory-KITTI-00-stereo-fast-{0}.txt'.format(idx) for idx in range(1, 11)]),
             ('ORBSLAM2 monocular', 'KITTI 03',
-             ['reference-trajectories/trajectory-KITTI-03-mono-{0}.txt'.format(idx) for idx in range(1, 11)],
+             ['orbslam-trajectories/trajectory-KITTI-03-mono-{0}.txt'.format(idx) for idx in range(1, 11)],
              ['fast-trajectories/trajectory-KITTI-03-mono-fast-{0}.txt'.format(idx) for idx in range(1, 11)]),
             ('ORBSLAM2 stereo', 'KITTI 03',
-             ['reference-trajectories/trajectory-KITTI-03-stereo-{0}.txt'.format(idx) for idx in range(1, 11)],
+             ['orbslam-trajectories/trajectory-KITTI-03-stereo-{0}.txt'.format(idx) for idx in range(1, 11)],
              ['fast-trajectories/trajectory-KITTI-03-stereo-fast-{0}.txt'.format(idx) for idx in range(1, 1)])
         ]

@@ -81,22 +81,22 @@ class OrbslamTUMVerify(base_verify.VerificationExperiment):
         """
         return [
             ('ORBSLAM2 monocular', 'TUM rgbd_dataset_freiburg1_xyz',
-             ['reference-trajectories/trajectory-TUM-rgbd_dataset_frieburg1_xyz-mono-{0}.txt'.format(idx)
+             ['orbslam-trajectories/trajectory-TUM-rgbd_dataset_frieburg1_xyz-mono-{0}.txt'.format(idx)
               for idx in range(1, 11)],
              ['fast-trajectories/trajectory-TUM-rgbd_dataset_frieburg1_xyz-mono-fast-{0}.txt'.format(idx)
               for idx in range(1, 11)]),
             ('ORBSLAM2 rgbd', 'TUM rgbd_dataset_freiburg1_xyz',
-             ['reference-trajectories/trajectory-TUM-rgbd_dataset_freiburg1_xyz-rgbd-{0}.txt'.format(idx)
+             ['orbslam-trajectories/trajectory-TUM-rgbd_dataset_freiburg1_xyz-rgbd-{0}.txt'.format(idx)
               for idx in range(1, 11)],
              ['fast-trajectories/trajectory-TUM-rgbd_dataset_freiburg1_xyz-rgbd-fast-{0}.txt'.format(idx)
               for idx in range(1, 11)]),
             ('ORBSLAM2 monocular', 'TUM rgbd_dataset_freiburg1_desk',
-             ['reference-trajectories/trajectory-TUM-rgbd_dataset_freiburg1_desk-mono-{0}.txt'.format(idx)
+             ['orbslam-trajectories/trajectory-TUM-rgbd_dataset_freiburg1_desk-mono-{0}.txt'.format(idx)
               for idx in range(1, 11)],
              ['fast-trajectories/trajectory-TUM-rgbd_dataset_freiburg1_desk-mono-fast-{0}.txt'.format(idx)
               for idx in range(1, 11)]),
             ('ORBSLAM2 rgbd', 'TUM rgbd_dataset_freiburg1_desk',
-             ['reference-trajectories/trajectory-TUM-rgbd_dataset_freiburg1_desk-rgbd-{0}.txt'.format(idx)
+             ['orbslam-trajectories/trajectory-TUM-rgbd_dataset_freiburg1_desk-rgbd-{0}.txt'.format(idx)
               for idx in range(1, 11)],
              ['fast-trajectories/trajectory-TUM-rgbd_dataset_freiburg1_desk-rgbd-fast-{0}.txt'.format(idx)
               for idx in range(1, 11)])
