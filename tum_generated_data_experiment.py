@@ -109,7 +109,7 @@ class TUMGeneratedDataExperiment(base_generated_data_experiment.GeneratedDataExp
         )
 
         # ORBSLAM2 - Create 2 variants, with different procesing modes
-        vocab_path = os.path.join('systems', 'slam', 'ORBSLAM2', 'ORBvoc.txt')
+        vocab_path = os.path.join('systems', 'ORBSLAM2', 'ORBvoc.txt')
         for sensor_mode in {orbslam2.SensorMode.RGBD, orbslam2.SensorMode.MONOCULAR}:
             self.import_system(
                 name='ORBSLAM2 {mode}'.format(mode=sensor_mode.name.lower()),

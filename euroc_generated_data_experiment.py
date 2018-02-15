@@ -113,7 +113,7 @@ class EurocGeneratedDataExperiment(base_generated_data_experiment.GeneratedDataE
 
         # ORBSLAM2 - Create 2 variants, stereo and mono
         # These datasets don't have
-        vocab_path = os.path.join('systems', 'slam', 'ORBSLAM2', 'ORBvoc.txt')
+        vocab_path = os.path.join('systems', 'ORBSLAM2', 'ORBvoc.txt')
         for sensor_mode in {orbslam2.SensorMode.STEREO, orbslam2.SensorMode.MONOCULAR}:
             self.import_system(
                 name='ORBSLAM2 {mode}'.format(mode=sensor_mode.name.lower()),

@@ -89,7 +89,7 @@ class KITTIGeneratedDataExperiment(base_generated_data_experiment.GeneratedDataE
         )
 
         # ORBSLAM2 - Create 3 variants, with different procesing modes
-        vocab_path = os.path.join('systems', 'slam', 'ORBSLAM2', 'ORBvoc.txt')
+        vocab_path = os.path.join('systems', 'ORBSLAM2', 'ORBvoc.txt')
         for sensor_mode in {orbslam2.SensorMode.STEREO, orbslam2.SensorMode.RGBD,
                             orbslam2.SensorMode.MONOCULAR}:
             self.import_system(
