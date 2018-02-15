@@ -89,6 +89,7 @@ def load_ref_trajectory(filename: str, exchange_coordinates=True) -> typing.Mapp
         for line in trajectory_file:
             parts = line.split(' ')
             if len(parts) >= 13:
+                # Line is pose as homogenous matrix
                 stamp, r00, r01, r02, t0, r10, r11, r12, t1, r20, r21, r22, t2 = parts[0:13]
                 if first_stamp is None:
                     first_stamp = float(stamp)
@@ -100,4 +101,14 @@ def load_ref_trajectory(filename: str, exchange_coordinates=True) -> typing.Mapp
                 ])
                 pose = np.dot(np.dot(coordinate_exchange, pose), coordinate_exchange.T)
                 trajectory[float(stamp) - first_stamp] = tf.Transform(pose)
+            elif len(parts) >= 8:
+                # Line is pose as transform, followed by quaternion orientation
+                stamp, tx, ty, tz, qx, qy, qz, qw = parts[0:8]
+                if first_stamp is None:
+                    first_stamp = float(stamp)
+                trajectory[float(stamp) - first_stamp] = tf.Transform(
+                    location=(tz, -tx, -ty),
+                    rotation=(qw, qz, -qx, -qy),
+                    w_first=True
+                )
     return trajectory
