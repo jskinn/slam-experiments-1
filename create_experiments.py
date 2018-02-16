@@ -3,6 +3,8 @@ import real_world_experiment
 import orbslam_kitti_verify
 import orbslam_euroc_verify
 import orbslam_tum_verify
+import libviso_euroc_verify
+import libviso_kitti_verify
 import orbslam_consistency_experiment
 import euroc_generated_data_experiment
 import tum_generated_data_experiment
@@ -17,6 +19,8 @@ def main():
     arvet.create_experiment.create_experiment(orbslam_kitti_verify.OrbslamKITTIVerify)
     arvet.create_experiment.create_experiment(orbslam_euroc_verify.OrbslamEuRoCVerify)
     arvet.create_experiment.create_experiment(orbslam_tum_verify.OrbslamTUMVerify)
+    arvet.create_experiment.create_experiment(libviso_euroc_verify.LibVisOEuRoCVerify)
+    arvet.create_experiment.create_experiment(libviso_kitti_verify.LibVisOKITTIVerify)
     arvet.create_experiment.create_experiment(orbslam_consistency_experiment.OrbslamConsistencyExperiment)
 
     # Synthetic data experiments
