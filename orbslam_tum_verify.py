@@ -1,5 +1,4 @@
 # Copyright (c) 2017, John Skinner
-import typing
 import os
 import arvet.database.client
 import arvet.config.path_manager
@@ -74,30 +73,44 @@ class OrbslamTUMVerify(base_verify.VerificationExperiment):
                 )
             )
 
-    def get_reference(self) -> typing.List[typing.Tuple[str, str, typing.List[str], typing.List[str]]]:
+    def plot_results(self, db_client: arvet.database.client.DatabaseClient):
         """
-        Get a list of reference passes, and the system & dataset names
-        :return: A list of tuples (reference_filename, system_name, dataset_name)
+        Plot the results for this experiment.
+        :param db_client:
+        :return:
         """
-        return [
-            ('ORBSLAM2 monocular', 'TUM rgbd_dataset_freiburg1_xyz',
+        import matplotlib.pyplot as pyplot
+
+        for system_name, dataset_name, rescale, reference_trajectories, fast_trajectories in [
+            ('ORBSLAM2 monocular', 'TUM rgbd_dataset_freiburg1_xyz', True,
              ['orbslam-trajectories/trajectory-TUM-rgbd_dataset_frieburg1_xyz-mono-{0}.txt'.format(idx)
               for idx in range(1, 11)],
              ['fast-trajectories/trajectory-TUM-rgbd_dataset_frieburg1_xyz-mono-fast-{0}.txt'.format(idx)
               for idx in range(1, 11)]),
-            ('ORBSLAM2 rgbd', 'TUM rgbd_dataset_freiburg1_xyz',
+            ('ORBSLAM2 rgbd', 'TUM rgbd_dataset_freiburg1_xyz', False,
              ['orbslam-trajectories/trajectory-TUM-rgbd_dataset_freiburg1_xyz-rgbd-{0}.txt'.format(idx)
               for idx in range(1, 11)],
              ['fast-trajectories/trajectory-TUM-rgbd_dataset_freiburg1_xyz-rgbd-fast-{0}.txt'.format(idx)
               for idx in range(1, 11)]),
-            ('ORBSLAM2 monocular', 'TUM rgbd_dataset_freiburg1_desk',
+            ('ORBSLAM2 monocular', 'TUM rgbd_dataset_freiburg1_desk', True,
              ['orbslam-trajectories/trajectory-TUM-rgbd_dataset_freiburg1_desk-mono-{0}.txt'.format(idx)
               for idx in range(1, 11)],
              ['fast-trajectories/trajectory-TUM-rgbd_dataset_freiburg1_desk-mono-fast-{0}.txt'.format(idx)
               for idx in range(1, 11)]),
-            ('ORBSLAM2 rgbd', 'TUM rgbd_dataset_freiburg1_desk',
+            ('ORBSLAM2 rgbd', 'TUM rgbd_dataset_freiburg1_desk', False,
              ['orbslam-trajectories/trajectory-TUM-rgbd_dataset_freiburg1_desk-rgbd-{0}.txt'.format(idx)
               for idx in range(1, 11)],
              ['fast-trajectories/trajectory-TUM-rgbd_dataset_freiburg1_desk-rgbd-fast-{0}.txt'.format(idx)
               for idx in range(1, 11)])
-        ]
+        ]:
+            self.create_plot(
+                db_client=db_client,
+                system_name=system_name,
+                dataset_name=dataset_name,
+                reference_filenames=reference_trajectories,
+                rescale=rescale,
+                extra_filenames=[
+                    ('locally without delays', fast_trajectories, 'g--')
+                ]
+            )
+        pyplot.show()

@@ -59,7 +59,8 @@ def plot_component(ax, trajectories: typing.List[typing.Mapping[float, tf.Transf
     line = None
     for idx, traj in enumerate(trajectories):
         x = sorted(traj.keys())
-        line = ax.plot(x, [get_value(traj[t]) for t in x], style, alpha=0.25, label="{0} {1}".format(label, idx))[0]
+        line = ax.plot(x, [get_value(traj[t]) for t in x], style,
+                       alpha=0.25, markersize=1, label="{0} {1}".format(label, idx))[0]
     return line
 
 

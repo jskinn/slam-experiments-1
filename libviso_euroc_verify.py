@@ -1,5 +1,4 @@
 # Copyright (c) 2017, John Skinner
-import typing
 import os
 import arvet.database.client
 import arvet.config.path_manager
@@ -54,14 +53,24 @@ class LibVisOEuRoCVerify(base_verify.VerificationExperiment):
         # --------- SYSTEMS -----------
         self.import_system(name='LibVisO2', system=libviso2.LibVisOSystem(), db_client=db_client)
 
-    def get_reference(self) -> typing.List[typing.Tuple[str, str, typing.List[str], typing.List[str]]]:
+    def plot_results(self, db_client: arvet.database.client.DatabaseClient):
         """
-        Get a list of reference passes, and the system & dataset names
-        :return: A list of tuples (reference_filename, system_name, dataset_name)
+        Plot the results for this experiment.
+        :param db_client:
+        :return:
         """
-        return [
+        import matplotlib.pyplot as pyplot
+
+        for system_name, dataset_name, reference_trajectories in [
             ('LibVisO2', 'EuRoC MH_01_easy',
-             ['libviso-trajectories/trajectory-EuRoC-MH_01_easy-{0}.txt'.format(idx) for idx in range(1, 11)], []),
+             ['libviso-trajectories/trajectory-EuRoC-MH_01_easy-{0}.txt'.format(idx) for idx in range(1, 11)]),
             ('LibVisO2', 'EuRoC MH_04_difficult',
-             ['libviso-trajectories/trajectory-EuRoC-MH_04_difficult-{0}.txt'.format(idx) for idx in range(1, 11)], [])
-        ]
+             ['libviso-trajectories/trajectory-EuRoC-MH_04_difficult-{0}.txt'.format(idx) for idx in range(1, 11)])
+        ]:
+            self.create_plot(
+                db_client=db_client,
+                system_name=system_name,
+                dataset_name=dataset_name,
+                reference_filenames=reference_trajectories
+            )
+        pyplot.show()

@@ -30,47 +30,55 @@ class VerificationExperiment(arvet.batch_analysis.simple_experiment.SimpleExperi
         super().__init__(systems=systems, datasets=datasets, benchmarks=benchmarks, repeats=repeats,
                          id_=id_, trial_map=trial_map, result_map=result_map, enabled=enabled)
 
-    def get_reference(self) -> typing.List[typing.Tuple[str, str, typing.List[str], typing.List[str]]]:
-        """
-        Get a list of reference passes, and the system & dataset names
-        :return: A list of tuples (system_name, dataset_name, reference_filenames, extra filenames)
-        """
-        return []
+    def create_plot(self, db_client: arvet.database.client.DatabaseClient, system_name: str, dataset_name: str,
+                    reference_filenames: typing.List[str], rescale: bool = False,
+                    extra_filenames: typing.List[typing.Tuple[str, typing.List[str], str]] = None):
+        if system_name not in self.systems:
+            logging.getLogger(__name__).warning("Missing system {0}".format(system_name))
+            return
+        if dataset_name not in self.datasets:
+            logging.getLogger(__name__).warning("Missing dataset {0}".format(dataset_name))
+            return
+        if extra_filenames is None:
+            extra_filenames = []
 
-    def plot_results(self, db_client: arvet.database.client.DatabaseClient):
-        """
-        Plot the results for this experiment.
-        :param db_client:
-        :return:
-        """
-        import matplotlib.pyplot as pyplot
-
-        # Visualize the different trajectories in each group
-        for system_name, dataset_name, reference_filenames, extra_filenames in self.get_reference():
-            if system_name not in self.systems:
-                logging.getLogger(__name__).warning("Missing system {0}".format(system_name))
-                continue
-            if dataset_name not in self.datasets:
-                logging.getLogger(__name__).warning("Missing dataset {0}".format(dataset_name))
-                continue
-
-            trial_result_list = self.get_trial_results(self.systems[system_name], self.datasets[dataset_name])
-            reference_trajectories = [load_ref_trajectory(filename) for filename in reference_filenames
-                                      if os.path.isfile(filename)]
-            extra_trajectories = [load_ref_trajectory(filename) for filename in extra_filenames
+        trial_result_list = self.get_trial_results(self.systems[system_name], self.datasets[dataset_name])
+        reference_trajectories = [load_ref_trajectory(filename) for filename in reference_filenames
                                   if os.path.isfile(filename)]
-            computed_trajectories = []
-            for trial_result_id in trial_result_list:
-                trial_result = dh.load_object(db_client, db_client.trials_collection, trial_result_id)
-                if trial_result is not None:
-                    computed_trajectories.append(trial_result.get_computed_camera_poses())
 
-            data_helpers.create_axis_plot("Trajectory for {0} on {1}".format(system_name, dataset_name), [
-                ('locally from example', reference_trajectories, 'b-'),
-                ('through framework on HPC', computed_trajectories, 'r--'),
-                ('locally without delays', extra_trajectories, 'g--')
-            ])
-        pyplot.show()
+        computed_trajectories = []
+        ground_truth_trajectories = []
+        for trial_result_id in trial_result_list:
+            trial_result = dh.load_object(db_client, db_client.trials_collection, trial_result_id)
+            if trial_result is not None:
+                computed_trajectories.append(zero_trajectory(trial_result.get_computed_camera_poses()))
+                if len(ground_truth_trajectories) <= 0:
+                    ground_truth_trajectories.append(zero_trajectory(trial_result.get_ground_truth_camera_poses()))
+
+        # Find the scale of the ground truth trajectory
+        gt_scale = 1
+        rescale = rescale and len(ground_truth_trajectories) >= 1
+        if rescale:
+            gt_scale = find_trajectory_scale(ground_truth_trajectories[0])
+            reference_trajectories = [rescale_trajectory(traj, gt_scale) for traj in reference_trajectories]
+            computed_trajectories = [rescale_trajectory(traj, gt_scale) for traj in computed_trajectories]
+
+        extra_trajectory_groups = []
+        for group_name, trajectory_files, style in extra_filenames:
+            trajectories = [load_ref_trajectory(filename) for filename in trajectory_files if os.path.isfile(filename)]
+            if rescale:
+                trajectories = [rescale_trajectory(traj, gt_scale) for traj in trajectories]
+            extra_trajectory_groups.append((group_name, trajectories, style))
+
+        # Build the graph
+        title = "Trajectory for {0} on {1}".format(system_name, dataset_name)
+        if rescale:
+            title += " (rescaled)"
+        data_helpers.create_axis_plot(title, [
+            ('locally from example', reference_trajectories, 'b-'),
+            ('through framework on HPC', computed_trajectories, 'r--'),
+            ('ground truth', ground_truth_trajectories, 'k.')
+        ] + extra_trajectory_groups)
 
 
 def load_ref_trajectory(filename: str, exchange_coordinates=True) -> typing.Mapping[float, tf.Transform]:
@@ -111,4 +119,41 @@ def load_ref_trajectory(filename: str, exchange_coordinates=True) -> typing.Mapp
                     rotation=(qw, qz, -qx, -qy),
                     w_first=True
                 )
-    return trajectory
+    return zero_trajectory(trajectory)
+
+
+def zero_trajectory(trajectory: typing.Mapping[float, tf.Transform]) -> typing.Mapping[float, tf.Transform]:
+    first_pose = trajectory[min(trajectory.keys())]
+    return {
+        stamp: first_pose.find_relative(pose)
+        for stamp, pose in trajectory.items()
+    }
+
+
+def find_trajectory_scale(trajectory: typing.Mapping[float, tf.Transform]) -> float:
+    timestamps = sorted(trajectory.keys())
+    speeds = []
+    for idx in range(1, len(timestamps)):
+        t0 = timestamps[idx - 1]
+        t1 = timestamps[idx]
+        dist = np.linalg.norm(trajectory[t1].location - trajectory[t0].location)
+        speeds.append(dist / (t1 - t0))
+    return float(np.mean(speeds))
+
+
+def rescale_trajectory(trajectory: typing.Mapping[float, tf.Transform], scale: float) \
+        -> typing.Mapping[float, tf.Transform]:
+    current_scale = find_trajectory_scale(trajectory)
+
+    timestamps = sorted(trajectory.keys())
+    scaled_trajectory = {timestamps[0]: trajectory[timestamps[0]]}
+    for idx in range(1, len(timestamps)):
+        t0 = timestamps[idx - 1]
+        t1 = timestamps[idx]
+        motion = trajectory[t0].find_relative(trajectory[t1])
+        scaled_trajectory[t1] = scaled_trajectory[t0].find_independent(tf.Transform(
+            location=(scale / current_scale) * motion.location,
+            rotation=motion.rotation_quat(w_first=True),
+            w_first=True
+        ))
+    return scaled_trajectory
