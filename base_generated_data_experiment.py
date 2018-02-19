@@ -26,7 +26,7 @@ class GeneratedDataExperiment(arvet.batch_analysis.experiment.Experiment):
     def __init__(self, systems=None,
                  simulators=None,
                  trajectory_groups=None,
-                 benchmarks=None,
+                 benchmarks=None, repeats=1,
                  trial_map=None, result_map=None, enabled=True, id_=None):
         """
         Constructor. We need parameters to load the different stored parts of this experiment
@@ -49,6 +49,7 @@ class GeneratedDataExperiment(arvet.batch_analysis.experiment.Experiment):
 
         # Benchmarks
         self._benchmarks = benchmarks if benchmarks is not None else {}
+        self._repeats = int(repeats)
 
     @property
     def systems(self) -> typing.Mapping[str, bson.ObjectId]:
@@ -97,7 +98,8 @@ class GeneratedDataExperiment(arvet.batch_analysis.experiment.Experiment):
                           db_client=db_client,
                           systems=list(self.systems.values()),
                           image_sources=datasets,
-                          benchmarks=list(self.benchmarks.values()))
+                          benchmarks=list(self.benchmarks.values()),
+                          repeats=self._repeats)
 
     def import_system(self, name: str, system: arvet.core.system.VisionSystem,
                       db_client: arvet.database.client.DatabaseClient) -> None:

@@ -28,7 +28,7 @@ class TUMGeneratedDataExperiment(base_generated_data_experiment.GeneratedDataExp
         :param enabled:
         :param id_:
         """
-        super().__init__(systems=systems, simulators=simulators, trajectory_groups=trajectory_groups,
+        super().__init__(systems=systems, simulators=simulators, trajectory_groups=trajectory_groups, repeats=10,
                          benchmarks=benchmarks, id_=id_, trial_map=trial_map, result_map=result_map, enabled=enabled)
 
     def do_imports(self, task_manager: arvet.batch_analysis.task_manager.TaskManager,
