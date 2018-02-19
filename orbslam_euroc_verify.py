@@ -97,26 +97,26 @@ class OrbslamEuRoCVerify(base_verify.VerificationExperiment):
         """
         import matplotlib.pyplot as pyplot
 
-        for system_name, dataset_name, rescale, reference_trajectories, fast_trajectories in [
+        for system_name, dataset_name, rescale, reference_trajectories, external_trajectories in [
             ('ORBSLAM2 monocular', 'EuRoC MH_01_easy', True,
              ['orbslam-trajectories/trajectory-EuRoC-MH_01_easy-mono-{0}.txt'.format(idx)
               for idx in range(1, 11)],
-             ['fast-trajectories/trajectory-EuRoC-MH_01_easy-mono-fast-{0}.txt'.format(idx)
+             ['orbslam-external-trajectories/trajectory-EuRoC-MH_01_easy-mono-{0}.txt'.format(idx)
               for idx in range(1, 11)]),
             ('ORBSLAM2 stereo', 'EuRoC MH_01_easy', False,
              ['orbslam-trajectories/trajectory-EuRoC-MH_01_easy-stereo-{0}.txt'.format(idx)
               for idx in range(1, 11)],
-             ['fast-trajectories/trajectory-EuRoC-MH_01_easy-stereo-fast-{0}.txt'.format(idx)
+             ['orbslam-external-trajectories/trajectory-EuRoC-MH_01_easy-stereo-{0}.txt'.format(idx)
               for idx in range(1, 11)]),
             ('ORBSLAM2 monocular', 'EuRoC MH_04_difficult', True,
              ['orbslam-trajectories/trajectory-EuRoC-MH_04_difficult-mono-{0}.txt'.format(idx)
               for idx in range(1, 11)],
-             ['fast-trajectories/trajectory-EuRoC-MH_04_difficult-mono-fast-{0}.txt'.format(idx)
+             ['orbslam-external-trajectories/trajectory-EuRoC-MH_04_difficult-mono-{0}.txt'.format(idx)
               for idx in range(1, 11)]),
             ('ORBSLAM2 stereo', 'EuRoC MH_04_difficult', False,
              ['orbslam-trajectories/trajectory-EuRoC-MH_04_difficult-stereo-{0}.txt'.format(idx)
               for idx in range(1, 11)],
-             ['fast-trajectories/trajectory-EuRoC-MH_04_difficult-stereo-fast-{0}.txt'.format(idx)
+             ['orbslam-external-trajectories/trajectory-EuRoC-MH_04_difficult-stereo-{0}.txt'.format(idx)
               for idx in range(1, 11)])
         ]:
             self.create_plot(
@@ -126,7 +126,7 @@ class OrbslamEuRoCVerify(base_verify.VerificationExperiment):
                 reference_filenames=reference_trajectories,
                 rescale=rescale,
                 extra_filenames=[
-                    ('locally without delays', fast_trajectories, 'g--')
+                    ('run on someone else\'s PC', external_trajectories, 'c--')
                 ]
             )
         pyplot.show()

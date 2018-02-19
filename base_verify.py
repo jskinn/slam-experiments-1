@@ -93,12 +93,19 @@ def load_ref_trajectory(filename: str, exchange_coordinates=True) -> typing.Mapp
         coordinate_exchange = np.identity(4)
 
     first_stamp = None
+    line_num = 0
     with open(filename, 'r') as trajectory_file:
         for line in trajectory_file:
+            line_num += 1
             parts = line.split(' ')
-            if len(parts) >= 13:
+            if len(parts) >= 12:
                 # Line is pose as homogenous matrix
-                stamp, r00, r01, r02, t0, r10, r11, r12, t1, r20, r21, r22, t2 = parts[0:13]
+                if len(parts) >= 13:
+                    stamp, r00, r01, r02, t0, r10, r11, r12, t1, r20, r21, r22, t2 = parts[0:13]
+                else:
+                    # Sometimes the stamp is missing, presumably an error in orbslam
+                    r00, r01, r02, t0, r10, r11, r12, t1, r20, r21, r22, t2 = parts[0:12]
+                    stamp = float(line_num)
                 if first_stamp is None:
                     first_stamp = float(stamp)
                 pose = np.matrix([
@@ -115,8 +122,8 @@ def load_ref_trajectory(filename: str, exchange_coordinates=True) -> typing.Mapp
                 if first_stamp is None:
                     first_stamp = float(stamp)
                 trajectory[float(stamp) - first_stamp] = tf.Transform(
-                    location=(tz, -tx, -ty),
-                    rotation=(qw, qz, -qx, -qy),
+                    location=(float(tz), -float(tx), -float(ty)),
+                    rotation=(float(qw), float(qz), -float(qx), -float(qy)),
                     w_first=True
                 )
     return zero_trajectory(trajectory)

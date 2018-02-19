@@ -79,19 +79,19 @@ class OrbslamKITTIVerify(base_verify.VerificationExperiment):
         """
         import matplotlib.pyplot as pyplot
 
-        for system_name, dataset_name, rescale, reference_trajectories, fast_trajectories in [
+        for system_name, dataset_name, rescale, reference_trajectories, external_trajectories in [
             ('ORBSLAM2 monocular', 'KITTI 00', True,
              ['orbslam-trajectories/trajectory-KITTI-00-mono-{0}.txt'.format(idx) for idx in range(1, 11)],
-             ['fast-trajectories/trajectory-KITTI-00-mono-fast-{0}.txt'.format(idx) for idx in range(1, 11)]),
+             ['orbslam-external-trajectories/trajectory-KITTI-00-mono-{0}.txt'.format(idx) for idx in range(1, 11)]),
             ('ORBSLAM2 stereo', 'KITTI 00', False,
              ['orbslam-trajectories/trajectory-KITTI-00-stereo-{0}.txt'.format(idx) for idx in range(1, 11)],
-             ['fast-trajectories/trajectory-KITTI-00-stereo-fast-{0}.txt'.format(idx) for idx in range(1, 11)]),
+             ['orbslam-external-trajectories/trajectory-KITTI-00-stereo-{0}.txt'.format(idx) for idx in range(1, 11)]),
             ('ORBSLAM2 monocular', 'KITTI 03', True,
              ['orbslam-trajectories/trajectory-KITTI-03-mono-{0}.txt'.format(idx) for idx in range(1, 11)],
-             ['fast-trajectories/trajectory-KITTI-03-mono-fast-{0}.txt'.format(idx) for idx in range(1, 11)]),
+             ['orbslam-external-trajectories/trajectory-KITTI-03-mono-{0}.txt'.format(idx) for idx in range(1, 11)]),
             ('ORBSLAM2 stereo', 'KITTI 03', False,
              ['orbslam-trajectories/trajectory-KITTI-03-stereo-{0}.txt'.format(idx) for idx in range(1, 11)],
-             ['fast-trajectories/trajectory-KITTI-03-stereo-fast-{0}.txt'.format(idx) for idx in range(1, 1)])
+             ['orbslam-external-trajectories/trajectory-KITTI-03-stereo-{0}.txt'.format(idx) for idx in range(1, 11)])
         ]:
             self.create_plot(
                 db_client=db_client,
@@ -100,7 +100,7 @@ class OrbslamKITTIVerify(base_verify.VerificationExperiment):
                 reference_filenames=reference_trajectories,
                 rescale=rescale,
                 extra_filenames=[
-                    ('locally without delays', fast_trajectories, 'g--')
+                    ('run on someone else\'s PC', external_trajectories, 'c--')
                 ]
             )
         pyplot.show()
