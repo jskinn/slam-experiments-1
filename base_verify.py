@@ -65,7 +65,8 @@ class VerificationExperiment(arvet.batch_analysis.simple_experiment.SimpleExperi
 
         extra_trajectory_groups = []
         for group_name, trajectory_files, style in extra_filenames:
-            trajectories = [load_ref_trajectory(filename) for filename in trajectory_files if os.path.isfile(filename)]
+            trajectories = [load_ref_trajectory(filename, ref_timestamps=sorted(reference_trajectories[0].keys()))
+                            for filename in trajectory_files if os.path.isfile(filename)]
             if rescale:
                 trajectories = [rescale_trajectory(traj, gt_scale) for traj in trajectories]
             extra_trajectory_groups.append((group_name, trajectories, style))
@@ -81,7 +82,8 @@ class VerificationExperiment(arvet.batch_analysis.simple_experiment.SimpleExperi
         ] + extra_trajectory_groups)
 
 
-def load_ref_trajectory(filename: str, exchange_coordinates=True) -> typing.Mapping[float, tf.Transform]:
+def load_ref_trajectory(filename: str, exchange_coordinates=True, ref_timestamps=None) \
+        -> typing.Mapping[float, tf.Transform]:
     trajectory = {}
 
     if exchange_coordinates:
@@ -105,7 +107,11 @@ def load_ref_trajectory(filename: str, exchange_coordinates=True) -> typing.Mapp
                 else:
                     # Sometimes the stamp is missing, presumably an error in orbslam
                     r00, r01, r02, t0, r10, r11, r12, t1, r20, r21, r22, t2 = parts[0:12]
-                    stamp = float(line_num)
+                    if ref_timestamps is not None and line_num < len(ref_timestamps):
+                        stamp = float(ref_timestamps[line_num])
+                    else:
+                        print("Missing timestamp number {0}".format(line_num))
+                        continue
                 if first_stamp is None:
                     first_stamp = float(stamp)
                 pose = np.matrix([
