@@ -9,6 +9,7 @@ import arvet.database.client
 import arvet.batch_analysis.simple_experiment
 import arvet.batch_analysis.task_manager
 import data_helpers
+import trajectory_helpers as th
 
 
 class VerificationExperiment(arvet.batch_analysis.simple_experiment.SimpleExperiment):
@@ -51,24 +52,24 @@ class VerificationExperiment(arvet.batch_analysis.simple_experiment.SimpleExperi
         for trial_result_id in trial_result_list:
             trial_result = dh.load_object(db_client, db_client.trials_collection, trial_result_id)
             if trial_result is not None:
-                computed_trajectories.append(zero_trajectory(trial_result.get_computed_camera_poses()))
+                computed_trajectories.append(th.zero_trajectory(trial_result.get_computed_camera_poses()))
                 if len(ground_truth_trajectories) <= 0:
-                    ground_truth_trajectories.append(zero_trajectory(trial_result.get_ground_truth_camera_poses()))
+                    ground_truth_trajectories.append(th.zero_trajectory(trial_result.get_ground_truth_camera_poses()))
 
         # Find the scale of the ground truth trajectory
         gt_scale = 1
         rescale = rescale and len(ground_truth_trajectories) >= 1
         if rescale:
-            gt_scale = find_trajectory_scale(ground_truth_trajectories[0])
-            reference_trajectories = [rescale_trajectory(traj, gt_scale) for traj in reference_trajectories]
-            computed_trajectories = [rescale_trajectory(traj, gt_scale) for traj in computed_trajectories]
+            gt_scale = th.find_trajectory_scale(ground_truth_trajectories[0])
+            reference_trajectories = [th.rescale_trajectory(traj, gt_scale) for traj in reference_trajectories]
+            computed_trajectories = [th.rescale_trajectory(traj, gt_scale) for traj in computed_trajectories]
 
         extra_trajectory_groups = []
         for group_name, trajectory_files, style in extra_filenames:
             trajectories = [load_ref_trajectory(filename, ref_timestamps=sorted(reference_trajectories[0].keys()))
                             for filename in trajectory_files if os.path.isfile(filename)]
             if rescale:
-                trajectories = [rescale_trajectory(traj, gt_scale) for traj in trajectories]
+                trajectories = [th.rescale_trajectory(traj, gt_scale) for traj in trajectories]
             extra_trajectory_groups.append((group_name, trajectories, style))
 
         # Build the graph
@@ -132,41 +133,4 @@ def load_ref_trajectory(filename: str, exchange_coordinates=True, ref_timestamps
                     rotation=(float(qw), float(qz), -float(qx), -float(qy)),
                     w_first=True
                 )
-    return zero_trajectory(trajectory)
-
-
-def zero_trajectory(trajectory: typing.Mapping[float, tf.Transform]) -> typing.Mapping[float, tf.Transform]:
-    first_pose = trajectory[min(trajectory.keys())]
-    return {
-        stamp: first_pose.find_relative(pose)
-        for stamp, pose in trajectory.items()
-    }
-
-
-def find_trajectory_scale(trajectory: typing.Mapping[float, tf.Transform]) -> float:
-    timestamps = sorted(trajectory.keys())
-    speeds = []
-    for idx in range(1, len(timestamps)):
-        t0 = timestamps[idx - 1]
-        t1 = timestamps[idx]
-        dist = np.linalg.norm(trajectory[t1].location - trajectory[t0].location)
-        speeds.append(dist / (t1 - t0))
-    return float(np.mean(speeds))
-
-
-def rescale_trajectory(trajectory: typing.Mapping[float, tf.Transform], scale: float) \
-        -> typing.Mapping[float, tf.Transform]:
-    current_scale = find_trajectory_scale(trajectory)
-
-    timestamps = sorted(trajectory.keys())
-    scaled_trajectory = {timestamps[0]: trajectory[timestamps[0]]}
-    for idx in range(1, len(timestamps)):
-        t0 = timestamps[idx - 1]
-        t1 = timestamps[idx]
-        motion = trajectory[t0].find_relative(trajectory[t1])
-        scaled_trajectory[t1] = scaled_trajectory[t0].find_independent(tf.Transform(
-            location=(scale / current_scale) * motion.location,
-            rotation=motion.rotation_quat(w_first=True),
-            w_first=True
-        ))
-    return scaled_trajectory
+    return th.zero_trajectory(trajectory)

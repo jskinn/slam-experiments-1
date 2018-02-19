@@ -18,6 +18,7 @@ import arvet.batch_analysis.task_manager
 import arvet.simulation.unrealcv.unrealcv_simulator as uecv_sim
 import arvet.simulation.controllers.trajectory_follow_controller as follow_cont
 import data_helpers
+import trajectory_helpers as th
 
 
 class GeneratedDataExperiment(arvet.batch_analysis.experiment.Experiment):
@@ -252,10 +253,11 @@ class GeneratedDataExperiment(arvet.batch_analysis.experiment.Experiment):
         for trajectory_group in self.trajectory_groups.values():
 
             # Collect the trial results for each image source in this group
-            plot_groups = []
             ground_truth_trajectory = None
             for system_name, system_id in self.systems.items():
                 # Real world trajectory
+                show = False
+                plot_groups = []
                 computed_trajectories = []
                 trial_result_list = self.get_trial_results(system_id, trajectory_group.reference_dataset)
                 for trial_result_id in trial_result_list:
@@ -263,7 +265,7 @@ class GeneratedDataExperiment(arvet.batch_analysis.experiment.Experiment):
                     if trial_result is not None:
                         computed_trajectories.append(trial_result.get_computed_camera_poses())
                         if ground_truth_trajectory is None:
-                            ground_truth_trajectory = trial_result.get_ground_truth_camera_poses()
+                            ground_truth_trajectory = th.zero_trajectory(trial_result.get_ground_truth_camera_poses())
                 plot_groups.append(('Real world dataset', computed_trajectories, 'b-'))
 
                 # Synthetic data trajectories
@@ -273,14 +275,17 @@ class GeneratedDataExperiment(arvet.batch_analysis.experiment.Experiment):
                     for trial_result_id in trial_result_list:
                         trial_result = dh.load_object(db_client, db_client.trials_collection, trial_result_id)
                         if trial_result is not None:
+                            show = True
                             computed_trajectories.append(trial_result.get_computed_camera_poses())
                             if ground_truth_trajectory is None:
-                                ground_truth_trajectory = trial_result.get_ground_truth_camera_poses()
+                                ground_truth_trajectory = th.zero_trajectory(
+                                    trial_result.get_ground_truth_camera_poses())
                     plot_groups.append((dataset_name, computed_trajectories, '--'))
-            if ground_truth_trajectory is not None:
-                plot_groups.append(('Ground truth', [ground_truth_trajectory], 'k-'))
-
-            data_helpers.create_axis_plot("Trajectories for {0}".format(trajectory_group.name), plot_groups)
+                if ground_truth_trajectory is not None:
+                    plot_groups.append(('Ground truth', [ground_truth_trajectory], 'k.'))
+                if show:
+                    data_helpers.create_axis_plot(
+                        "Trajectories for {0} on {1}".format(system_name, trajectory_group.name), plot_groups)
         pyplot.show()
 
     def export_data(self, db_client: arvet.database.client.DatabaseClient):
