@@ -80,7 +80,7 @@ class VerificationExperiment(arvet.batch_analysis.simple_experiment.SimpleExperi
             ('locally from example', reference_trajectories, 'b-'),
             ('through framework on HPC', computed_trajectories, 'r--'),
             ('ground truth', ground_truth_trajectories, 'k.')
-        ] + extra_trajectory_groups)
+        ] + extra_trajectory_groups, os.path.join('figures', type(self).__name__))
 
 
 def load_ref_trajectory(filename: str, exchange_coordinates=True, ref_timestamps=None) \

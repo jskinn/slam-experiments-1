@@ -1,6 +1,7 @@
 # Copyright (c) 2017, John Skinner
 import typing
 import bson
+import os.path
 import arvet.util.database_helpers as dh
 import arvet.util.dict_utils as du
 import arvet.util.trajectory_helpers as traj_help
@@ -251,6 +252,8 @@ class GeneratedDataExperiment(arvet.batch_analysis.experiment.Experiment):
         """
         import matplotlib.pyplot as pyplot
 
+        colours = ['g', 'r', 'c', 'm', 'y', 'k']
+
         # Group and print the trajectories for graphing
         for trajectory_group in self.trajectory_groups.values():
 
@@ -268,10 +271,11 @@ class GeneratedDataExperiment(arvet.batch_analysis.experiment.Experiment):
                         computed_trajectories.append(trial_result.get_computed_camera_poses())
                         if ground_truth_trajectory is None:
                             ground_truth_trajectory = th.zero_trajectory(trial_result.get_ground_truth_camera_poses())
-                plot_groups.append(('Real world dataset', computed_trajectories, 'b-'))
+                plot_groups.append(('Real world dataset', computed_trajectories, 'b.'))
 
                 # Synthetic data trajectories
-                for dataset_name, dataset_id in trajectory_group.generated_datasets.items():
+                for idx, (dataset_name, dataset_id) in enumerate(trajectory_group.generated_datasets.items()):
+                    line_colour = colours[idx % len(colours)]
                     computed_trajectories = []
                     trial_result_list = self.get_trial_results(system_id, dataset_id)
                     for trial_result_id in trial_result_list:
@@ -282,12 +286,15 @@ class GeneratedDataExperiment(arvet.batch_analysis.experiment.Experiment):
                             if ground_truth_trajectory is None:
                                 ground_truth_trajectory = th.zero_trajectory(
                                     trial_result.get_ground_truth_camera_poses())
-                    plot_groups.append((dataset_name, computed_trajectories, '--'))
+                    plot_groups.append((dataset_name, computed_trajectories, line_colour + 'o'))
                 if ground_truth_trajectory is not None:
                     plot_groups.append(('Ground truth', [ground_truth_trajectory], 'k.'))
                 if show:
                     data_helpers.create_axis_plot(
-                        "Trajectories for {0} on {1}".format(system_name, trajectory_group.name), plot_groups)
+                        title="Trajectories for {0} on {1}".format(system_name, trajectory_group.name),
+                        trajectory_groups=plot_groups,
+                        save_path=os.path.join('figures', type(self).__name__)
+                    )
         pyplot.show()
 
     def export_data(self, db_client: arvet.database.client.DatabaseClient):

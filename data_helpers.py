@@ -1,3 +1,4 @@
+import os
 import typing
 import json
 import bson
@@ -60,13 +61,13 @@ def plot_component(ax, trajectories: typing.List[typing.Mapping[float, tf.Transf
     for idx, traj in enumerate(trajectories):
         x = sorted(traj.keys())
         line = ax.plot(x, [get_value(traj[t]) for t in x], style,
-                       alpha=0.5, markersize=1, label="{0} {1}".format(label, idx))[0]
+                       alpha=0.25, markersize=2, label="{0} {1}".format(label, idx))[0]
     return line
 
 
 def create_axis_plot(title: str, trajectory_groups: typing.List[
                          typing.Tuple[str, typing.List[typing.Mapping[float, tf.Transform]], str]
-                     ]):
+                     ], save_path:str = None):
     """
     Create a plot of location and rotation coordinate values as a function time.
     This is useful for checking if different trajectories are the same
@@ -80,7 +81,7 @@ def create_axis_plot(title: str, trajectory_groups: typing.List[
     figure.suptitle(title)
     legend_labels = []
     legend_lines = {}
-    for idx, (title, units, get_value) in enumerate([
+    for idx, (subtitle, units, get_value) in enumerate([
         ('x axis', 'meters', lambda t: t.location[0]),
         ('y axis', 'meters', lambda t: t.location[1]),
         ('z axis', 'meters', lambda t: t.location[2]),
@@ -89,7 +90,7 @@ def create_axis_plot(title: str, trajectory_groups: typing.List[
         ('yaw', 'degrees', lambda t: 180 * t.euler[2] / np.pi)
     ]):
         ax = figure.add_subplot(231 + idx)
-        ax.set_title(title)
+        ax.set_title(subtitle)
         ax.set_xlabel('time')
         ax.set_ylabel(units)
         for label, traj_group, style in trajectory_groups:
@@ -98,6 +99,11 @@ def create_axis_plot(title: str, trajectory_groups: typing.List[
                 legend_lines[label] = line
                 legend_labels.append(label)
     pyplot.figlegend([legend_lines[label] for label in legend_labels], legend_labels, loc='upper right')
+    if save_path is not None:
+        os.makedirs(save_path, exist_ok=True)
+        figure.savefig(os.path.join(save_path, title + '.svg'))
+        figure.savefig(os.path.join(save_path, title + '.png'))
+        pyplot.close(figure)
 
 
 def export_trajectory_as_json(trial_results: typing.Mapping[str, bson.ObjectId], filename: str,
