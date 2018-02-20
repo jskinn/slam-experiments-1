@@ -228,15 +228,14 @@ class GeneratedDataExperiment(arvet.batch_analysis.experiment.Experiment):
             #     'normal_maps_enabled': False,
             #     'roughness_enabled': False,
             #     'geometry_decimation': 4,
-            # }), ('worst quality', {
-            #     # absolute minimum quality
-            #     'resolution': {'width': 256, 'height': 144},
-            #     'fov': 15,
-            #     'depth_of_field_enabled': False,
-            #     'texture_mipmap_bias': 8,
-            #     'normal_maps_enabled': False,
-            #     'roughness_enabled': False,
-            #     'geometry_decimation': 4,
+        }), ('worst visual quality', {
+            # absolute minimum visual quality, can still reduce FOV and resolution
+            'lit_mode': False,
+            'depth_of_field_enabled': False,
+            'texture_mipmap_bias': 8,
+            'normal_maps_enabled': False,
+            'roughness_enabled': False,
+            'geometry_decimation': 4,
         })]
 
         # Do the imports for the group, and save any changes
