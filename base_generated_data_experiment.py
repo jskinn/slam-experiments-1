@@ -600,7 +600,7 @@ def update_trajectory_group_schema(serialized: dict, db_client: arvet.database.c
         for name in merged_names:
             sim_name, quality_name = name.split(' ', 1)
             if sim_name not in serialized['generated_datasets']:
-                serialized['generated_datasets'] = {}
+                serialized['generated_datasets'][sim_name] = {}
             serialized['generated_datasets'][sim_name][quality_name] = serialized['generated_datasets'][name]
             del serialized['generated_datasets'][name]
 
