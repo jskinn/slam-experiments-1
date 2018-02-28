@@ -18,6 +18,7 @@ import arvet.batch_analysis.experiment
 import arvet.batch_analysis.task_manager
 import arvet.simulation.unrealcv.unrealcv_simulator as uecv_sim
 import arvet.simulation.controllers.trajectory_follow_controller as follow_cont
+import arvet_slam.benchmarks.rpe.relative_pose_error
 import data_helpers
 import trajectory_helpers as th
 
@@ -78,8 +79,16 @@ class GeneratedDataExperiment(arvet.batch_analysis.experiment.Experiment):
         :param db_client: The database client, for saving declared objects too small to need a task
         :return:
         """
+        # Update the trajectory groups
         for trajectory_group in self.trajectory_groups.values():
             self.update_trajectory_group(trajectory_group, task_manager, db_client)
+
+        # Add a RPE benchmark for all experiments
+        self.import_benchmark(
+            name='Relative Pose Error',
+            benchmark=arvet_slam.benchmarks.rpe.relative_pose_error.BenchmarkRPE(max_pairs=0),
+            db_client=db_client
+        )
 
     def schedule_tasks(self, task_manager: arvet.batch_analysis.task_manager.TaskManager,
                        db_client: arvet.database.client.DatabaseClient):
@@ -259,10 +268,13 @@ class GeneratedDataExperiment(arvet.batch_analysis.experiment.Experiment):
             # Collect the trial results for each image source in this group
             ground_truth_trajectory = None
             for system_name, system_id in self.systems.items():
-                # Real world trajectory
+
                 show = False
                 plot_groups = []
+                results_by_world = {}
                 computed_trajectories = []
+
+                # Real world trajectory
                 trial_result_list = self.get_trial_results(system_id, trajectory_group.reference_dataset)
                 for trial_result_id in trial_result_list:
                     trial_result = dh.load_object(db_client, db_client.trials_collection, trial_result_id)
@@ -273,25 +285,47 @@ class GeneratedDataExperiment(arvet.batch_analysis.experiment.Experiment):
                 plot_groups.append(('Real world dataset', computed_trajectories, 'b.'))
 
                 # Synthetic data trajectories
-                for idx, (dataset_name, dataset_id) in enumerate(trajectory_group.generated_datasets.items()):
-                    line_colour = colours[idx % len(colours)]
-                    computed_trajectories = []
-                    trial_result_list = self.get_trial_results(system_id, dataset_id)
-                    for trial_result_id in trial_result_list:
-                        trial_result = dh.load_object(db_client, db_client.trials_collection, trial_result_id)
-                        if trial_result is not None:
-                            show = True
-                            computed_trajectories.append(trial_result.get_computed_camera_poses())
-                            if ground_truth_trajectory is None:
-                                ground_truth_trajectory = th.zero_trajectory(
-                                    trial_result.get_ground_truth_camera_poses())
-                    plot_groups.append((dataset_name, computed_trajectories, line_colour + 'o'))
+                for idx, (sim_name, quality_map) in enumerate(trajectory_group.generated_datasets.items()):
+                    if sim_name not in results_by_world:
+                        results_by_world[sim_name] = {}
+
+                    for quality_name, dataset_id in quality_map.items():
+                        if quality_name not in results_by_world[sim_name]:
+                            results_by_world[sim_name][quality_name] = []
+
+                        line_colour = colours[idx % len(colours)]
+                        computed_trajectories = []
+                        trial_result_list = self.get_trial_results(system_id, dataset_id)
+                        for trial_result_id in trial_result_list:
+                            trial_result = dh.load_object(db_client, db_client.trials_collection, trial_result_id)
+                            if trial_result is not None:
+                                show = True
+                                computed_trajectories.append(trial_result.get_computed_camera_poses())
+                                if ground_truth_trajectory is None:
+                                    ground_truth_trajectory = th.zero_trajectory(
+                                        trial_result.get_ground_truth_camera_poses())
+
+                                # Get and store the RPE benchmark result for this trial
+                                result_id = self.get_benchmark_result(trial_result_id,
+                                                                      self.benchmarks['Relative Pose Error'])
+                                if result_id is not None:
+                                    results_by_world[sim_name][quality_name].append(
+                                        dh.load_object(db_client, db_client.results_collection, result_id)
+                                    )
+
+                        plot_groups.append((sim_name + ' ' + quality_name,
+                                            computed_trajectories, line_colour + 'o'))
                 if ground_truth_trajectory is not None:
                     plot_groups.append(('Ground truth', [ground_truth_trajectory], 'k.'))
                 if show:
                     data_helpers.create_axis_plot(
                         title="Trajectories for {0} on {1}".format(system_name, trajectory_group.name),
                         trajectory_groups=plot_groups,
+                        save_path=os.path.join('figures', type(self).__name__)
+                    )
+                    create_error_distribution_plot(
+                        title="Error distributions for {0} on {1}".format(system_name, trajectory_group.name),
+                        results_by_world=results_by_world,
                         save_path=os.path.join('figures', type(self).__name__)
                     )
         pyplot.show()
@@ -312,12 +346,11 @@ class GeneratedDataExperiment(arvet.batch_analysis.experiment.Experiment):
             )
 
         # Group and print the trajectories for graphing
-        systems = du.defaults({'LIBVISO 2': self._libviso_system}, self._orbslam_systems)
         for trajectory_group in self._trajectory_groups.values():
 
             # Collect the trial results for each image source in this group
             trial_results = {}
-            for system_name, system_id in systems.items():
+            for system_name, system_id in self.systems.items():
                 for dataset_name, dataset_id in trajectory_group.datasets.items():
                     trial_result_list = self.get_trial_result(system_id, dataset_id)
                     for idx, trial_result_id in enumerate(trial_result_list):
@@ -406,16 +439,36 @@ class TrajectoryGroup:
         self.follow_controller_id = controller_id
         self.generated_datasets = generated_datasets if generated_datasets is not None else {}
 
-    @property
-    def datasets(self):
-        return du.defaults({'reference dataset': self.reference_dataset}, self.generated_datasets)
-
     def get_all_dataset_ids(self) -> set:
         """
         Get all the datasets in this group, as a set
         :return:
         """
-        return set(self.generated_datasets.values()) | {self.reference_dataset}
+        return {self.reference_dataset} | set(
+            dataset_id
+            for quality_map in self.generated_datasets.values()
+            for dataset_id in quality_map.values()
+        )
+
+    def get_datasets_for_sim(self, sim_name: str) -> typing.Mapping[str, bson.ObjectId]:
+        """
+        Get all the generated datasets from a particular simulator
+        :param sim_name:
+        :return:
+        """
+        return self.generated_datasets[sim_name]
+
+    def get_datasets_for_quality(self, quality_name: str) -> typing.Mapping[str, bson.ObjectId]:
+        """
+        Get all the generated datasets at a particular quality
+        :param quality_name:
+        :return:
+        """
+        return {
+            sim_name: quality_map[quality_name]
+            for sim_name, quality_map in self.generated_datasets.items()
+            if quality_name in quality_map
+        }
 
     def schedule_generation(self, simulators: typing.Mapping[str, bson.ObjectId],
                             quality_variations: typing.List[typing.Tuple[str, dict]],
@@ -497,7 +550,9 @@ class TrajectoryGroup:
                         expected_duration='4:00:00'
                     )
                     if generate_dataset_task.is_finished:
-                        self.generated_datasets["{0} {1}".format(sim_name, quality_name)] = generate_dataset_task.result
+                        if sim_name not in self.generated_datasets:
+                            self.generated_datasets[sim_name] = {}
+                        self.generated_datasets[sim_name][quality_name] = generate_dataset_task.result
                         changed = True
                     else:
                         task_manager.do_task(generate_dataset_task)
@@ -540,8 +595,67 @@ def update_trajectory_group_schema(serialized: dict, db_client: arvet.database.c
             not dh.check_reference_is_valid(db_client.image_source_collection, serialized['controller_id']):
         del serialized['controller_id']
     if 'generated_datasets' in serialized:
-        keys = list(serialized['generated_datasets'].keys())
-        for key in keys:
-            if not dh.check_reference_is_valid(db_client.image_source_collection,
-                                               serialized['generated_datasets'][key]):
-                del serialized['generated_datasets'][key]
+        # Split keys where the sim name and quality name have been joined together
+        merged_names = [name for name in serialized['generated_datasets'].keys() if ' ' in name]
+        for name in merged_names:
+            sim_name, quality_name = name.split(' ', 1)
+            if sim_name not in serialized['generated_datasets']:
+                serialized['generated_datasets'] = {}
+            serialized['generated_datasets'][sim_name][quality_name] = serialized['generated_datasets'][name]
+            del serialized['generated_datasets'][name]
+
+        # Remove invalid dataset ids in each map
+        for quality_map in serialized['generated_datasets'].values():
+            keys = list(quality_map.keys())
+            for key in keys:
+                if not dh.check_reference_is_valid(db_client.image_source_collection, quality_map[key]):
+                    del quality_map[key]
+
+        # Remove sim names with no results
+        keys = [sim_name for sim_name, quality_map in serialized['generated_datasets'].items() if len(quality_map) <= 0]
+        for sim_name in keys:
+            del serialized['generated_datasets'][sim_name]
+
+
+def create_error_distribution_plot(title, results_by_world, save_path=None):
+    import matplotlib.pyplot as pyplot
+    figure, axes = pyplot.subplots(len(results_by_world), 2, squeeze=False, figsize=(14, 10), dpi=80)
+    figure.suptitle(title)
+
+    # Pick colours for each quality level, to be consistent across all the graphs
+    colours = ['red', 'blue', 'green', 'cyan', 'gold', 'magenta', 'brown', 'purple', 'orange']
+    color_idx = 0
+    colour_map = {}
+    for results_by_quality in results_by_world.values():
+        for quality_name in results_by_quality.keys():
+            if quality_name not in colour_map:
+                colour_map = colours[color_idx]
+                color_idx += 1
+
+    for sim_idx, (sim_name, results_by_quality) in enumerate(results_by_world.items()):
+        trans_ax = axes[sim_idx][0]
+        trans_ax.set_title('{0} translational error'.format(sim_name))
+        trans_ax.set_xlabel('error (m)')
+        trans_ax.set_ylabel('frequency')
+
+        rot_ax = axes[sim_idx][1]
+        rot_ax.set_title('{0} rotational error'.format(sim_name))
+        rot_ax.set_xlabel('error (radians)')
+        rot_ax.set_ylabel('frequency')
+
+        for quality_name, results_list in results_by_quality.items():
+            trans_errors = []
+            rot_errors = []
+            for result in results_list:
+                trans_errors += list(result.translational_error.values())
+                rot_errors += list(result.rotational_error.values())
+            trans_ax.hist(trans_errors, 200, alpha=0.5, label=quality_name, facecolor=colour_map[quality_name])
+            rot_ax.hist(rot_errors, 200, alpha=0.5, label=quality_name, facecolor=colour_map[quality_name])
+            color_idx += 1
+
+    # pyplot.figlegend([legend_lines[label] for label in legend_labels], legend_labels, loc='upper right')
+    if save_path is not None:
+        os.makedirs(save_path, exist_ok=True)
+        figure.savefig(os.path.join(save_path, title + '.svg'))
+        figure.savefig(os.path.join(save_path, title + '.png'))
+        pyplot.close(figure)
