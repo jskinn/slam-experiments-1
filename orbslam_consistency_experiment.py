@@ -216,7 +216,6 @@ class OrbslamConsistencyExperiment(arvet.batch_analysis.simple_experiment.Simple
             ax = figure.add_subplot(111)
             ax.set_xlabel('meters')
             ax.set_ylabel('frequency')
-            # std = np.std(trans_precision)
             ax.hist(variance, 100, label='distance')
 
             figure = pyplot.figure(figsize=(14, 10), dpi=80)
@@ -224,7 +223,6 @@ class OrbslamConsistencyExperiment(arvet.batch_analysis.simple_experiment.Simple
             ax = figure.add_subplot(111)
             ax.set_xlabel('seconds')
             ax.set_ylabel('frequency')
-            # std = np.std(trans_precision)
             ax.hist(time_variance, 100, label='time')
 
             figure = pyplot.figure(figsize=(14, 10), dpi=80)
@@ -232,8 +230,14 @@ class OrbslamConsistencyExperiment(arvet.batch_analysis.simple_experiment.Simple
             ax = figure.add_subplot(111)
             ax.set_xlabel('radians')
             ax.set_ylabel('frequency')
-            # std = np.std(trans_precision)
             ax.hist(rot_variance, 100, label='angle')
+
+            figure = pyplot.figure(figsize=(14, 10), dpi=80)
+            figure.suptitle("{0} distribution of trans error".format(system_name))
+            ax = figure.add_subplot(111)
+            ax.set_xlabel('error (meters)')
+            ax.set_ylabel('frequency')
+            ax.hist(trans_error, 100, label='angle')
 
             pyplot.tight_layout()
             pyplot.subplots_adjust(top=0.95, right=0.99)
