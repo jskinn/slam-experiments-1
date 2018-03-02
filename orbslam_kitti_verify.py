@@ -100,7 +100,7 @@ class OrbslamKITTIVerify(base_verify.VerificationExperiment):
                 reference_filenames=reference_trajectories,
                 rescale=rescale,
                 extra_filenames=[
-                    ('run on someone else\'s PC', external_trajectories, 'c--')
+                    ('run on someone else\'s PC', external_trajectories, {'c': 'cyan', 'linestyle': '--'})
                 ]
             )
         pyplot.show()

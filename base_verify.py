@@ -33,7 +33,7 @@ class VerificationExperiment(arvet.batch_analysis.simple_experiment.SimpleExperi
 
     def create_plot(self, db_client: arvet.database.client.DatabaseClient, system_name: str, dataset_name: str,
                     reference_filenames: typing.List[str], rescale: bool = False,
-                    extra_filenames: typing.List[typing.Tuple[str, typing.List[str], str]] = None):
+                    extra_filenames: typing.List[typing.Tuple[str, typing.List[str], dict]] = None):
         if system_name not in self.systems:
             logging.getLogger(__name__).warning("Missing system {0}".format(system_name))
             return
@@ -77,9 +77,9 @@ class VerificationExperiment(arvet.batch_analysis.simple_experiment.SimpleExperi
         if rescale:
             title += " (rescaled)"
         data_helpers.create_axis_plot(title, [
-            ('locally from example', reference_trajectories, 'b-'),
-            ('through framework on HPC', computed_trajectories, 'r--'),
-            ('ground truth', ground_truth_trajectories, 'k.')
+            ('locally from example', reference_trajectories, {'c': 'blue', 'linestyle': '-', 'marker': 'None'}),
+            ('through framework on HPC', computed_trajectories, {'c': 'red', 'linestyle': '--', 'marker': 'None'}),
+            ('ground truth', ground_truth_trajectories, {'c': 'black'})
         ] + extra_trajectory_groups, os.path.join('figures', type(self).__name__))
 
 

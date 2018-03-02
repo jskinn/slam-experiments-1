@@ -6,6 +6,7 @@ import numpy as np
 import arvet.util.database_helpers as dh
 import arvet.util.unreal_transform as uetf
 import arvet.util.transform as tf
+import arvet.util.dict_utils as du
 import arvet.database.client
 
 
@@ -47,40 +48,44 @@ def plot_trajectory(axis, trajectory: typing.Mapping[float, tf.Transform], label
 
 
 def plot_component(ax, trajectories: typing.List[typing.Mapping[float, tf.Transform]],
-                   get_value: typing.Callable[[tf.Transform], float], style: str = '-', label=''):
+                   get_value: typing.Callable[[tf.Transform], float], label: str = '', alpha: float = 1.0, **kwargs):
     """
     Plot a particular trajectory component over time on an axis for a number of trajectories
     :param ax: The axis on which to plot
     :param trajectories: The list of trajectories to plot
     :param get_value: A getter to retrieve the y value from the Transform object
-    :param style: The style of the lines for these components
     :param label: The label
+    :param alpha: The total alpha value of the line, which will be divided amonst the given trajectories
     :return:
     """
-    line = None
+    du.defaults(kwargs, {
+        'markersize': 2,
+        'marker': '.',
+        'linestyle': 'None'
+    })
     for idx, traj in enumerate(trajectories):
         x = sorted(traj.keys())
-        line = ax.plot(x, [get_value(traj[t]) for t in x], style,
-                       alpha=0.25, markersize=2, label="{0} {1}".format(label, idx))[0]
-    return line
+        ax.plot(x, [get_value(traj[t]) for t in x], alpha=alpha / len(trajectories),
+                label="{0} {1}".format(label, idx), **kwargs)
 
 
 def create_axis_plot(title: str, trajectory_groups: typing.List[
-                         typing.Tuple[str, typing.List[typing.Mapping[float, tf.Transform]], str]
-                     ], save_path:str = None):
+                         typing.Tuple[str, typing.List[typing.Mapping[float, tf.Transform]], dict]
+                     ], save_path: str = None):
     """
     Create a plot of location and rotation coordinate values as a function time.
     This is useful for checking if different trajectories are the same
-    :param system_name: The name of the system, for the plot title
-    :param dataset_name: The dataset name, for the plot title
+    :param title: The plot title
     :param trajectory_groups: A list of tuples, each containing a name, a list of trajectories, and a plot style
+    :param save_path: An optional path to save the plot to, rather than display it
     :return:
     """
     import matplotlib.pyplot as pyplot
-    figure = pyplot.figure(figsize=(14, 10), dpi=80)
+    import matplotlib.patches as mpatches
+
+    figure = pyplot.figure(figsize=(20, 10), dpi=80)
     figure.suptitle(title)
-    legend_labels = []
-    legend_lines = {}
+    legend_handles = []
     for idx, (subtitle, units, get_value) in enumerate([
         ('x axis', 'meters', lambda t: t.location[0]),
         ('y axis', 'meters', lambda t: t.location[1]),
@@ -93,15 +98,15 @@ def create_axis_plot(title: str, trajectory_groups: typing.List[
         ax.set_title(subtitle)
         ax.set_xlabel('time')
         ax.set_ylabel(units)
-        for label, traj_group, style in trajectory_groups:
-            line = plot_component(ax, traj_group, get_value, style=style)
-            if label not in legend_lines and line is not None:
-                legend_lines[label] = line
-                legend_labels.append(label)
-    pyplot.figlegend([legend_lines[label] for label in legend_labels], legend_labels, loc='upper right')
+        for label, traj_group, plot_kwargs in trajectory_groups:
+            plot_component(ax, traj_group, get_value, alpha=0.5, **plot_kwargs)
+            if idx == 0:
+                legend_handles.append(mpatches.Patch(color=plot_kwargs['c'], alpha=0.5, label=label))
+    pyplot.figlegend(handles=legend_handles, loc='upper right')
+    figure.tight_layout()
     if save_path is not None:
         os.makedirs(save_path, exist_ok=True)
-        figure.savefig(os.path.join(save_path, title + '.svg'))
+        # figure.savefig(os.path.join(save_path, title + '.svg'))
         figure.savefig(os.path.join(save_path, title + '.png'))
         pyplot.close(figure)
 
