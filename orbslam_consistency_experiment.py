@@ -4,6 +4,7 @@ import logging
 import numpy as np
 import arvet.util.database_helpers as dh
 import arvet.util.associate as ass
+import arvet.util.transform as tf
 import arvet.database.client
 import arvet.config.path_manager
 import arvet.batch_analysis.simple_experiment
@@ -11,6 +12,7 @@ import arvet.batch_analysis.task_manager
 import arvet_slam.systems.slam.orbslam2 as orbslam2
 import arvet_slam.dataset.tum.tum_manager
 import data_helpers
+import trajectory_helpers as th
 
 
 class OrbslamConsistencyExperiment(arvet.batch_analysis.simple_experiment.SimpleExperiment):
@@ -107,7 +109,260 @@ class OrbslamConsistencyExperiment(arvet.batch_analysis.simple_experiment.Simple
         :return:
         """
         # Visualize the different trajectories in each group
-        self._plot_variations(db_client)
+        self._plot_estimate_variance(db_client)
+        self._plot_error_vs_motion(db_client)
+        # self._plot_variations(db_client)
+
+    def _plot_estimate_variance(self, db_client: arvet.database.client.DatabaseClient):
+        import matplotlib.pyplot as pyplot
+        # noinspection PyUnresolvedReferences
+        from mpl_toolkits.mplot3d import Axes3D
+
+        save_path = os.path.expanduser('~/Pictures/orbslam variance heatmaps')
+        os.makedirs(save_path, exist_ok=True)
+
+        logging.getLogger(__name__).info("Plotting error vs motion and saving to {0} ...".format(save_path))
+
+        colours = ['red', 'blue', 'green', 'cyan', 'gold', 'magenta', 'brown', 'purple', 'orange']
+        for dataset_name, dataset_id in self.datasets.items():
+            colour_map = {}
+            colour_idx = 0
+
+            for system_name, system_id in self.systems.items():
+                logging.getLogger(__name__).info("    .... distributions for {0} on {1}".format(system_name,
+                                                                                                dataset_name))
+
+                colour_map[system_name] = colours[colour_idx]
+                colour_idx += 1
+
+                x_variance = []
+                y_variance = []
+                z_variance = []
+
+                trial_result_list = self.get_trial_results(system_id, dataset_id)
+                ground_truth_traj = None
+                gt_scale = None
+                computed_trajectories = []
+                timestamps = []
+
+                if len(trial_result_list) <= 0:
+                    continue
+
+                # Collect all the trial results
+                for trial_result_id in trial_result_list:
+                    trial_result = dh.load_object(db_client, db_client.trials_collection, trial_result_id)
+                    if trial_result is not None and trial_result.success:
+                        if ground_truth_traj is None:
+                            ground_truth_traj = trial_result.get_ground_truth_camera_poses()
+                            gt_scale = th.find_trajectory_scale(ground_truth_traj)
+                        traj = trial_result.get_computed_camera_poses()
+
+                        # Normalize monocular trajectories
+                        if 'mono' in system_name.lower():
+                            if gt_scale is not None:
+                                traj = th.rescale_trajectory(traj, gt_scale)
+                            else:
+                                logging.getLogger(__name__).warning("Cannot rescale trajectory, missing ground truth")
+
+                        computed_trajectories.append(traj)
+                        timestamps.append({k: v for k, v in ass.associate(ground_truth_traj, traj,
+                                                                          max_difference=0.1, offset=0)})
+
+                # Now that we have all the trajectories, we can measure consistency
+                current_pose = None
+                for time in sorted(ground_truth_traj.keys()):
+                    if sum(1 for idx in range(len(timestamps)) if time in timestamps[idx]) <= 1:
+                        # Skip locations/results which appear in only one trajectory
+                        continue
+
+                    # Find the distance to the prev frame
+                    prev_pose = current_pose
+                    current_pose = ground_truth_traj[time]
+                    if prev_pose is not None:
+                        # Find the mean estimated location for this time
+                        computed_motions = [
+                            prev_pose.find_relative(computed_trajectories[idx][timestamps[idx][time]]).location
+                            for idx in range(len(computed_trajectories))
+                            if time in timestamps[idx]
+                        ]
+                        mean_computed_motion = np.mean(computed_motions, axis=0)
+                        x_variance += [computed_motion[0] - mean_computed_motion[0]
+                                       for computed_motion in computed_motions]
+                        y_variance += [computed_motion[1] - mean_computed_motion[1]
+                                       for computed_motion in computed_motions]
+                        z_variance += [computed_motion[2] - mean_computed_motion[2]
+                                       for computed_motion in computed_motions]
+
+                # Plot error vs motion in that direction
+                title = "{0} on {1} estimate variation".format(system_name, dataset_name)
+                figure = pyplot.figure(figsize=(30, 10), dpi=80)
+                figure.suptitle(title)
+
+                # Find the largest and smallest variance in each axis so we can square our plots
+                ax_min = np.min(x_variance + y_variance + z_variance)
+                ax_max = np.max(x_variance + y_variance + z_variance)
+                ax_std = 3 * np.std(x_variance + y_variance + z_variance)
+                if ax_min < -1 * ax_std:
+                    logging.getLogger(__name__).warning("    axis min {0} is more than 3 standard deviations away, clamping".format(ax_min))
+                    ax_min = -1 * ax_std
+                if ax_max < ax_std:
+                    logging.getLogger(__name__).warning("    axis max {0} is more than 3 standard deviations away, clamping".format(ax_max))
+                    ax_max = ax_std
+
+                hist_range = [[ax_min, ax_max], [ax_min, ax_max]]
+
+                ax = figure.add_subplot(131)
+                ax.set_title('front')
+                ax.set_xlabel('y')
+                ax.set_ylabel('z')
+                heatmap, xedges, yedges = np.histogram2d(y_variance, z_variance, bins=300, range=hist_range)
+                ax.imshow(heatmap.T, extent=[xedges[0], xedges[-1], yedges[0], yedges[-1]], origin='lower',
+                          aspect='auto', cmap=pyplot.get_cmap('inferno_r'))
+
+                ax = figure.add_subplot(132)
+                ax.set_title('side')
+                ax.set_xlabel('x')
+                ax.set_ylabel('z')
+                heatmap, xedges, yedges = np.histogram2d(x_variance, z_variance, bins=300, range=hist_range)
+                ax.imshow(heatmap.T, extent=[xedges[0], xedges[-1], yedges[0], yedges[-1]], origin='lower',
+                          aspect='auto', cmap=pyplot.get_cmap('inferno_r'))
+
+                ax = figure.add_subplot(133)
+                ax.set_title('top')
+                ax.set_xlabel('x')
+                ax.set_ylabel('y')
+                heatmap, xedges, yedges = np.histogram2d(x_variance, y_variance, bins=300, range=hist_range)
+                ax.imshow(heatmap.T, extent=[xedges[0], xedges[-1], yedges[0], yedges[-1]], origin='lower',
+                          aspect='auto', cmap=pyplot.get_cmap('inferno_r'))
+
+                pyplot.tight_layout()
+                pyplot.subplots_adjust(top=0.95, right=0.99)
+
+                figure.savefig(os.path.join(save_path, title + '.png'))
+                pyplot.close(figure)
+
+        # Show all the graphs remaining
+        pyplot.show()
+
+    def _plot_error_vs_motion(self, db_client: arvet.database.client.DatabaseClient):
+        import matplotlib.pyplot as pyplot
+        # noinspection PyUnresolvedReferences
+        from mpl_toolkits.mplot3d import Axes3D
+
+        save_path = os.path.expanduser('~/Pictures/orbslam error vs motion heatmaps')
+        os.makedirs(save_path, exist_ok=True)
+
+        logging.getLogger(__name__).info("Plotting error vs motion and saving to {0} ...".format(save_path))
+
+        for dataset_name, dataset_id in self.datasets.items():
+            for system_name, system_id in self.systems.items():
+                logging.getLogger(__name__).info("    .... distributions for {0} on {1}".format(system_name,
+                                                                                                dataset_name))
+
+                forward_motion = []
+                sideways_motion = []
+                vertical_motion = []
+                forward_error = []
+                sideways_error = []
+                vertical_error = []
+
+                trial_result_list = self.get_trial_results(system_id, dataset_id)
+                ground_truth_traj = None
+                gt_scale = None
+                computed_trajectories = []
+                timestamps = []
+
+                if len(trial_result_list) <= 0:
+                    continue
+
+                # Collect all the trial results
+                for trial_result_id in trial_result_list:
+                    trial_result = dh.load_object(db_client, db_client.trials_collection, trial_result_id)
+                    if trial_result is not None and trial_result.success:
+                        if ground_truth_traj is None:
+                            ground_truth_traj = trial_result.get_ground_truth_camera_poses()
+                            gt_scale = th.find_trajectory_scale(ground_truth_traj)
+                        traj = trial_result.get_computed_camera_poses()
+
+                        # Normalize monocular trajectories
+                        if 'mono' in system_name.lower():
+                            if gt_scale is not None:
+                                traj = th.rescale_trajectory(traj, gt_scale)
+                            else:
+                                logging.getLogger(__name__).warning("Cannot rescale trajectory, missing ground truth")
+
+                        computed_trajectories.append(traj)
+                        timestamps.append({k: v for k, v in ass.associate(ground_truth_traj, traj,
+                                                                          max_difference=0.1, offset=0)})
+
+                # Now that we have all the trajectories, we can measure consistency
+                current_pose = None
+                total_distance = 0
+                for time in sorted(ground_truth_traj.keys()):
+                    if sum(1 for idx in range(len(timestamps)) if time in timestamps[idx]) <= 1:
+                        # Skip locations/results which appear in only one trajectory
+                        continue
+
+                    # Find the distance to the prev frame
+                    prev_pose = current_pose
+                    current_pose = ground_truth_traj[time]
+                    if prev_pose is not None:
+                        motion = prev_pose.find_relative(current_pose)
+                        to_prev_frame = np.linalg.norm(current_pose.location - prev_pose.location)
+                    else:
+                        motion = tf.Transform()
+                        to_prev_frame = 0
+                    total_distance += to_prev_frame
+
+                    errors = []
+
+                    # For each computed pose at this time
+                    for idx in range(len(computed_trajectories)):
+                        if time in timestamps[idx]:
+                            computed_pose = computed_trajectories[idx][timestamps[idx][time]]
+                            errors.append(np.linalg.norm(current_pose.location - computed_pose.location))
+                            if prev_pose is not None:
+                                computed_motion = prev_pose.find_relative(computed_pose)
+                                forward_motion.append(motion.location[0])
+                                sideways_motion.append(motion.location[1])
+                                vertical_motion.append(motion.location[2])
+                                forward_error.append(computed_motion.location[0] - motion.location[0])
+                                sideways_error.append(computed_motion.location[1] - motion.location[1])
+                                vertical_error.append(computed_motion.location[2] - motion.location[2])
+
+                # Plot error vs motion in that direction
+                title = "{0} on {1} error vs motion".format(system_name, dataset_name)
+                figure = pyplot.figure(figsize=(30, 10), dpi=80)
+                figure.suptitle(title)
+                ax = figure.add_subplot(131)
+                ax.set_title('forward')
+                ax.set_xlabel('motion (m)')
+                ax.set_ylabel('error (m)')
+                heatmap, xedges, yedges = np.histogram2d(forward_motion, forward_error, bins=300)
+                ax.imshow(heatmap.T, extent=[xedges[0], xedges[-1], yedges[0], yedges[-1]], origin='lower',
+                          aspect='auto', cmap=pyplot.get_cmap('inferno_r'))
+
+                ax = figure.add_subplot(132)
+                ax.set_title('sideways')
+                ax.set_xlabel('motion (m)')
+                ax.set_ylabel('error (m)')
+                heatmap, xedges, yedges = np.histogram2d(sideways_motion, sideways_error, bins=300)
+                ax.imshow(heatmap.T, extent=[xedges[0], xedges[-1], yedges[0], yedges[-1]], origin='lower',
+                          aspect='auto', cmap=pyplot.get_cmap('inferno_r'))
+
+                ax = figure.add_subplot(133)
+                ax.set_title('vertical')
+                ax.set_xlabel('motion (m)')
+                ax.set_ylabel('error (m)')
+                heatmap, xedges, yedges = np.histogram2d(vertical_motion, vertical_error, bins=300)
+                ax.imshow(heatmap.T, extent=[xedges[0], xedges[-1], yedges[0], yedges[-1]], origin='lower',
+                          aspect='auto', cmap=pyplot.get_cmap('inferno_r'))
+
+                pyplot.tight_layout()
+                pyplot.subplots_adjust(top=0.95, right=0.99)
+
+                figure.savefig(os.path.join(save_path, title + '.png'))
+                pyplot.close(figure)
 
     def _plot_variations(self, db_client: arvet.database.client.DatabaseClient):
         """
@@ -238,6 +493,14 @@ class OrbslamConsistencyExperiment(arvet.batch_analysis.simple_experiment.Simple
             ax.set_xlabel('error (meters)')
             ax.set_ylabel('frequency')
             ax.hist(trans_error, 100, label='angle')
+
+            # Plot motion vs error
+            figure = pyplot.figure(figsize=(14, 10), dpi=80)
+            figure.suptitle("{0} motion vs error".format(system_name))
+            ax = figure.add_subplot(111)
+            ax.set_xlabel('error')
+            ax.set_ylabel('absolute deviation')
+            ax.plot(distances_to_prev_frame, trans_error, 'o', alpha=0.5, markersize=1)
 
             pyplot.tight_layout()
             pyplot.subplots_adjust(top=0.95, right=0.99)
