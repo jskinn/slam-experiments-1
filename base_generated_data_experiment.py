@@ -1,4 +1,5 @@
 # Copyright (c) 2017, John Skinner
+import logging
 import typing
 import bson
 import os.path
@@ -260,10 +261,12 @@ class GeneratedDataExperiment(arvet.batch_analysis.experiment.Experiment):
         """
         import matplotlib.pyplot as pyplot
 
-        colours = ['g', 'r', 'c', 'm', 'y', 'k']
+        colours = ['red', 'green', 'cyan', 'gold', 'magenta', 'brown', 'purple', 'orange',
+                   'navy', 'darkkhaki', 'darkgreen', 'crimson']
 
         # Group and print the trajectories for graphing
         for trajectory_group in self.trajectory_groups.values():
+            logging.getLogger(__name__).info("Plotting results for {0} ...".format(trajectory_group.name))
 
             # Collect the trial results for each image source in this group
             ground_truth_trajectory = None
@@ -279,31 +282,35 @@ class GeneratedDataExperiment(arvet.batch_analysis.experiment.Experiment):
                 for trial_result_id in trial_result_list:
                     trial_result = dh.load_object(db_client, db_client.trials_collection, trial_result_id)
                     if trial_result is not None:
-                        computed_trajectories.append(trial_result.get_computed_camera_poses())
                         if ground_truth_trajectory is None:
                             ground_truth_trajectory = th.zero_trajectory(trial_result.get_ground_truth_camera_poses())
-                plot_groups.append(('Real world dataset', computed_trajectories, 'b.'))
+                        traj = th.zero_trajectory(trial_result.get_computed_camera_poses())
+                        computed_trajectories.append(traj)
+
+                plot_groups.append(('Real world dataset', computed_trajectories, {'c': 'blue'}))
 
                 # Synthetic data trajectories
                 for idx, (sim_name, quality_map) in enumerate(trajectory_group.generated_datasets.items()):
                     if sim_name not in results_by_world:
                         results_by_world[sim_name] = {}
 
-                    for quality_name, dataset_id in quality_map.items():
+                    for qual_idx, (quality_name, dataset_id) in enumerate(quality_map.items()):
                         if quality_name not in results_by_world[sim_name]:
                             results_by_world[sim_name][quality_name] = []
 
-                        line_colour = colours[idx % len(colours)]
                         computed_trajectories = []
                         trial_result_list = self.get_trial_results(system_id, dataset_id)
                         for trial_result_id in trial_result_list:
                             trial_result = dh.load_object(db_client, db_client.trials_collection, trial_result_id)
                             if trial_result is not None:
                                 show = True
-                                computed_trajectories.append(trial_result.get_computed_camera_poses())
+
                                 if ground_truth_trajectory is None:
                                     ground_truth_trajectory = th.zero_trajectory(
                                         trial_result.get_ground_truth_camera_poses())
+
+                                computed_trajectories.append(th.zero_trajectory(
+                                    trial_result.get_computed_camera_poses()))
 
                                 # Get and store the RPE benchmark result for this trial
                                 result_id = self.get_benchmark_result(trial_result_id,
@@ -314,19 +321,30 @@ class GeneratedDataExperiment(arvet.batch_analysis.experiment.Experiment):
                                     )
 
                         plot_groups.append((sim_name + ' ' + quality_name,
-                                            computed_trajectories, line_colour + 'o'))
+                                            computed_trajectories, {
+                                                'c': colours[(idx * len(quality_map) + qual_idx) % len(colours)]
+                                            }))
                 if ground_truth_trajectory is not None:
-                    plot_groups.append(('Ground truth', [ground_truth_trajectory], 'k.'))
-                if show:
+                    plot_groups.append(('Ground truth', [ground_truth_trajectory], {'c': 'black'}))
+                if show or True:
+                    logging.getLogger(__name__).info("    creating plot \"Trajectories for {0} on {1}\"".format(
+                        system_name, trajectory_group.name))
                     data_helpers.create_axis_plot(
                         title="Trajectories for {0} on {1}".format(system_name, trajectory_group.name),
                         trajectory_groups=plot_groups,
-                        save_path=os.path.join('figures', type(self).__name__)
+                        save_path=os.path.join('figures', type(self).__name__, 'trajectories')
                     )
+                    logging.getLogger(__name__).info("    creating plot \"Error distributions for {0} on {1}\"".format(
+                        system_name, trajectory_group.name))
                     create_error_distribution_plot(
                         title="Error distributions for {0} on {1}".format(system_name, trajectory_group.name),
                         results_by_world=results_by_world,
-                        save_path=os.path.join('figures', type(self).__name__)
+                        save_path=os.path.join('figures', type(self).__name__, 'error distributions')
+                    )
+                    create_error_vs_time_plot(
+                        title="Error vs time for {0} on {1}".format(system_name, trajectory_group.name),
+                        results_by_world=results_by_world,
+                        save_path=os.path.join('figures', type(self).__name__, 'error vs time')
                     )
         pyplot.show()
 
@@ -619,18 +637,22 @@ def update_trajectory_group_schema(serialized: dict, db_client: arvet.database.c
 
 def create_error_distribution_plot(title, results_by_world, save_path=None):
     import matplotlib.pyplot as pyplot
-    figure, axes = pyplot.subplots(len(results_by_world), 2, squeeze=False, figsize=(14, 10), dpi=80)
+    import matplotlib.patches as mpatches
+    figure, axes = pyplot.subplots(len(results_by_world), 2, squeeze=False,
+                                   figsize=(14, 5 * len(results_by_world)), dpi=80)
     figure.suptitle(title)
 
     # Pick colours for each quality level, to be consistent across all the graphs
     colours = ['red', 'blue', 'green', 'cyan', 'gold', 'magenta', 'brown', 'purple', 'orange']
     color_idx = 0
     colour_map = {}
+    legend_handles = []
     for results_by_quality in results_by_world.values():
         for quality_name in results_by_quality.keys():
             if quality_name not in colour_map:
-                colour_map = colours[color_idx]
+                colour_map[quality_name] = colours[color_idx]
                 color_idx += 1
+                legend_handles.append(mpatches.Patch(color=colour_map[quality_name], alpha=0.5, label=quality_name))
 
     for sim_idx, (sim_name, results_by_quality) in enumerate(results_by_world.items()):
         trans_ax = axes[sim_idx][0]
@@ -651,11 +673,66 @@ def create_error_distribution_plot(title, results_by_world, save_path=None):
                 rot_errors += list(result.rotational_error.values())
             trans_ax.hist(trans_errors, 200, alpha=0.5, label=quality_name, facecolor=colour_map[quality_name])
             rot_ax.hist(rot_errors, 200, alpha=0.5, label=quality_name, facecolor=colour_map[quality_name])
-            color_idx += 1
 
-    # pyplot.figlegend([legend_lines[label] for label in legend_labels], legend_labels, loc='upper right')
+    pyplot.figlegend(handles=legend_handles, loc='upper right')
+    figure.tight_layout()
     if save_path is not None:
         os.makedirs(save_path, exist_ok=True)
-        figure.savefig(os.path.join(save_path, title + '.svg'))
+        # figure.savefig(os.path.join(save_path, title + '.svg'))
+        figure.savefig(os.path.join(save_path, title + '.png'))
+        pyplot.close(figure)
+
+
+def create_error_vs_time_plot(title, results_by_world, save_path=None):
+    import matplotlib.pyplot as pyplot
+    figure, axes = pyplot.subplots(len(results_by_world), 2, squeeze=False,
+                                   figsize=(14, 8 * len(results_by_world)), dpi=80)
+    figure.suptitle(title)
+
+    # Pick colours for each quality level, to be consistent across all the graphs
+    colours = ['red', 'blue', 'green', 'cyan', 'gold', 'magenta', 'brown', 'purple', 'orange']
+    color_idx = 0
+    colour_map = {}
+    for results_by_quality in results_by_world.values():
+        for quality_name in results_by_quality.keys():
+            if quality_name not in colour_map:
+                colour_map[quality_name] = colours[color_idx]
+                color_idx += 1
+
+    legend_labels = []
+    legend_lines = {}
+
+    for sim_idx, (sim_name, results_by_quality) in enumerate(results_by_world.items()):
+        trans_ax = axes[sim_idx][0]
+        trans_ax.set_title('{0} translational error'.format(sim_name))
+        trans_ax.set_xlabel('time')
+        trans_ax.set_ylabel('error (m)')
+
+        rot_ax = axes[sim_idx][1]
+        rot_ax.set_title('{0} rotational error'.format(sim_name))
+        rot_ax.set_xlabel('time')
+        rot_ax.set_ylabel('error (radians)')
+
+        for quality_name, results_list in results_by_quality.items():
+            for result in results_list:
+                times = sorted(result.translational_error.keys())
+                errors = [result.translational_error[t] for t in times]
+                line = trans_ax.plot(times, errors, alpha=1 / len(results_list), label=quality_name,
+                                     linestyle='None', marker='.', markersize=2, c=colour_map[quality_name])
+
+                times = sorted(result.rotational_error.keys())
+                errors = [result.rotational_error[t] for t in times]
+                rot_ax.plot(times, errors, alpha=1 / len(results_list), label=quality_name,
+                            linestyle='None', marker='.', markersize=2, c=colour_map[quality_name])
+
+                if quality_name not in legend_lines:
+                    legend_labels.append(quality_name)
+                    legend_lines[quality_name] = line[0]
+
+    pyplot.figlegend([legend_lines[label] for label in legend_labels], legend_labels, loc='upper right')
+    figure.tight_layout()
+    if save_path is not None:
+        os.makedirs(save_path, exist_ok=True)
+        # figure.savefig(os.path.join(save_path, title + '.svg'))
         figure.savefig(os.path.join(save_path, title + '.png'))
         pyplot.close(figure)
