@@ -290,13 +290,13 @@ class GeneratedDataExperiment(arvet.batch_analysis.experiment.Experiment):
                 plot_groups.append(('Real world dataset', computed_trajectories, {'c': 'blue'}))
 
                 # Synthetic data trajectories
-                for idx, (sim_name, quality_map) in enumerate(trajectory_group.generated_datasets.items()):
-                    if sim_name not in results_by_world:
-                        results_by_world[sim_name] = {}
+                for idx, (world_name, quality_map) in enumerate(trajectory_group.generated_datasets.items()):
+                    if world_name not in results_by_world:
+                        results_by_world[world_name] = {}
 
                     for qual_idx, (quality_name, dataset_id) in enumerate(quality_map.items()):
-                        if quality_name not in results_by_world[sim_name]:
-                            results_by_world[sim_name][quality_name] = []
+                        if quality_name not in results_by_world[world_name]:
+                            results_by_world[world_name][quality_name] = []
 
                         computed_trajectories = []
                         trial_result_list = self.get_trial_results(system_id, dataset_id)
@@ -316,11 +316,11 @@ class GeneratedDataExperiment(arvet.batch_analysis.experiment.Experiment):
                                 result_id = self.get_benchmark_result(trial_result_id,
                                                                       self.benchmarks['Relative Pose Error'])
                                 if result_id is not None:
-                                    results_by_world[sim_name][quality_name].append(
+                                    results_by_world[world_name][quality_name].append(
                                         dh.load_object(db_client, db_client.results_collection, result_id)
                                     )
 
-                        plot_groups.append((sim_name + ' ' + quality_name,
+                        plot_groups.append((world_name + ' ' + quality_name,
                                             computed_trajectories, {
                                                 'c': colours[(idx * len(quality_map) + qual_idx) % len(colours)]
                                             }))
@@ -553,7 +553,14 @@ class TrajectoryGroup:
                 changed = True
 
         # Then, for each simulator listed for this trajectory group
+        origin_counts = {}
         for sim_name, origin in self.mappings:
+            # Count how many times each simulator is used, so we can assign a unique world name to each start point
+            if sim_name not in origin_counts:
+                origin_counts[sim_name] = 1
+            else:
+                origin_counts[sim_name] += 1
+
             # Schedule generation of quality variations that don't exist yet
             if sim_name in simulators:
                 # For every quality variation
@@ -568,9 +575,10 @@ class TrajectoryGroup:
                         expected_duration='4:00:00'
                     )
                     if generate_dataset_task.is_finished:
-                        if sim_name not in self.generated_datasets:
-                            self.generated_datasets[sim_name] = {}
-                        self.generated_datasets[sim_name][quality_name] = generate_dataset_task.result
+                        world_name = "{0} {1}".format(sim_name, origin_counts[sim_name])
+                        if world_name not in self.generated_datasets:
+                            self.generated_datasets[world_name] = {}
+                        self.generated_datasets[world_name][quality_name] = generate_dataset_task.result
                         changed = True
                     else:
                         task_manager.do_task(generate_dataset_task)
@@ -613,14 +621,6 @@ def update_trajectory_group_schema(serialized: dict, db_client: arvet.database.c
             not dh.check_reference_is_valid(db_client.image_source_collection, serialized['controller_id']):
         del serialized['controller_id']
     if 'generated_datasets' in serialized:
-        # Split keys where the sim name and quality name have been joined together
-        merged_names = [name for name in serialized['generated_datasets'].keys() if ' ' in name]
-        for name in merged_names:
-            sim_name, quality_name = name.split(' ', 1)
-            if sim_name not in serialized['generated_datasets']:
-                serialized['generated_datasets'][sim_name] = {}
-            serialized['generated_datasets'][sim_name][quality_name] = serialized['generated_datasets'][name]
-            del serialized['generated_datasets'][name]
 
         # Remove invalid dataset ids in each map
         for quality_map in serialized['generated_datasets'].values():
