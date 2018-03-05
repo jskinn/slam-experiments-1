@@ -136,6 +136,9 @@ class OrbslamConsistencyExperiment(arvet.batch_analysis.simple_experiment.Simple
                 x_motion_variance = []
                 y_motion_variance = []
                 z_motion_variance = []
+                x_motion_normalized = []
+                y_motion_normalized = []
+                z_motion_normalized = []
 
                 trial_result_list = self.get_trial_results(system_id, dataset_id)
                 ground_truth_traj = None
@@ -164,7 +167,7 @@ class OrbslamConsistencyExperiment(arvet.batch_analysis.simple_experiment.Simple
                                 logging.getLogger(__name__).warning("Cannot rescale trajectory, missing ground truth")
 
                         computed_trajectories.append(traj)
-                        computed_motion_sequences.append(trajectory_to_motion_sequence(traj))
+                        computed_motion_sequences.append(th.trajectory_to_motion_sequence(traj))
                         timestamps.append({k: v for k, v in ass.associate(ground_truth_traj, traj,
                                                                           max_difference=0.1, offset=0)})
 
@@ -198,6 +201,7 @@ class OrbslamConsistencyExperiment(arvet.batch_analysis.simple_experiment.Simple
                     ]
                     if len(computed_motions) > 0:
                         mean_computed_motion = np.mean(computed_motions, axis=0)
+                        std_computed_motion = np.std(computed_motions, axis=0)
                         motion_times += [time for _ in range(len(computed_motions))]
                         x_motion_variance += [computed_motion[0] - mean_computed_motion[0]
                                               for computed_motion in computed_motions]
@@ -205,6 +209,12 @@ class OrbslamConsistencyExperiment(arvet.batch_analysis.simple_experiment.Simple
                                               for computed_motion in computed_motions]
                         z_motion_variance += [computed_motion[2] - mean_computed_motion[2]
                                               for computed_motion in computed_motions]
+                        x_motion_normalized += [(computed_motion[0] - mean_computed_motion[0]) / std_computed_motion[0]
+                                                for computed_motion in computed_motions]
+                        y_motion_normalized += [(computed_motion[1] - mean_computed_motion[1]) / std_computed_motion[1]
+                                                for computed_motion in computed_motions]
+                        z_motion_normalized += [(computed_motion[2] - mean_computed_motion[2]) / std_computed_motion[2]
+                                                for computed_motion in computed_motions]
 
                 # Plot location variance vs time
                 title = "{0} on {1} estimate variation".format(system_name, dataset_name)
@@ -230,7 +240,7 @@ class OrbslamConsistencyExperiment(arvet.batch_analysis.simple_experiment.Simple
                 ax.plot(times, z_variance, c='blue', alpha=0.5, marker='.', markersize=2, linestyle='None')
 
                 pyplot.tight_layout()
-                pyplot.subplots_adjust(top=0.95, right=0.99)
+                pyplot.subplots_adjust(top=0.90, right=0.99)
 
                 figure.savefig(os.path.join(save_path, title + '.png'))
                 pyplot.close(figure)
@@ -297,6 +307,48 @@ class OrbslamConsistencyExperiment(arvet.batch_analysis.simple_experiment.Simple
                         linestyle='None')
 
                 pyplot.tight_layout()
+                pyplot.subplots_adjust(top=0.90, right=0.99)
+
+                figure.savefig(os.path.join(save_path, title + '.png'))
+                pyplot.close(figure)
+
+                # Plot computed motion variance in each axis
+                title = "{0} on {1} combined motion estimate variation".format(system_name, dataset_name)
+                figure = pyplot.figure(figsize=(30, 10), dpi=80)
+                figure.suptitle(title)
+
+                ax = figure.add_subplot(111)
+                ax.set_xlabel('time (s)')
+                ax.set_ylabel('variance (m)')
+                ax.plot(motion_times, x_motion_variance, c='red', alpha=0.5, marker='.', markersize=2,
+                        linestyle='None')
+                ax.plot(motion_times, y_motion_variance, c='green', alpha=0.5, marker='.', markersize=2,
+                        linestyle='None')
+                ax.plot(motion_times, z_motion_variance, c='blue', alpha=0.5, marker='.', markersize=2,
+                        linestyle='None')
+
+                pyplot.tight_layout()
+                pyplot.subplots_adjust(top=0.95, right=0.99)
+
+                figure.savefig(os.path.join(save_path, title + '.png'))
+                pyplot.close(figure)
+
+                # Plot histogram of normalized variance
+                title = "{0} on {1} motion variance histogram".format(system_name, dataset_name)
+                figure = pyplot.figure(figsize=(30, 10), dpi=80)
+                figure.suptitle(title)
+
+                ax = figure.add_subplot(111)
+                ax.set_xlabel('time (s)')
+                ax.set_ylabel('variance (m)')
+                if np.min(x_motion_normalized) < np.max(x_motion_normalized):
+                    ax.hist(x_motion_normalized, bins=100, color='red', alpha=0.3, label='x axis')
+                if np.min(y_motion_normalized) < np.max(y_motion_normalized):
+                    ax.hist(y_motion_normalized, bins=100, color='green', alpha=0.3, label='y axis')
+                if np.min(z_motion_normalized) < np.max(z_motion_normalized):
+                    ax.hist(z_motion_normalized, bins=100, color='blue', alpha=0.3, label='z axis')
+
+                pyplot.tight_layout()
                 pyplot.subplots_adjust(top=0.95, right=0.99)
 
                 figure.savefig(os.path.join(save_path, title + '.png'))
@@ -332,7 +384,7 @@ class OrbslamConsistencyExperiment(arvet.batch_analysis.simple_experiment.Simple
                           aspect='auto', cmap=pyplot.get_cmap('inferno_r'))
 
                 pyplot.tight_layout()
-                pyplot.subplots_adjust(top=0.95, right=0.99)
+                pyplot.subplots_adjust(top=0.90, right=0.99)
 
                 figure.savefig(os.path.join(save_path, title + '.png'))
                 pyplot.close(figure)
@@ -784,19 +836,3 @@ def quat_diff(q1, q2):
     """
     z0 = q1[0] * q2[0] - q1[1] * q2[1] - q1[2] * q2[2] - q1[3] * q2[3]
     return 2 * np.arccos(min(1, max(-1, z0)))
-
-
-def trajectory_to_motion_sequence(trajectory):
-    """
-    Convert a trajectory into a sequence of relative motions
-    :param trajectory:
-    :return:
-    """
-    times = sorted(trajectory.keys())
-    prev_time = times[0]
-    motions = {}
-    for time in times[1:]:
-        motion = trajectory[prev_time].find_relative(trajectory[time])
-        prev_time = time
-        motions[time] = motion
-    return motions

@@ -38,3 +38,20 @@ def rescale_trajectory(trajectory: typing.Mapping[float, tf.Transform], scale: f
             w_first=True
         ))
     return scaled_trajectory
+
+
+def trajectory_to_motion_sequence(trajectory: typing.Mapping[float, tf.Transform]) -> \
+        typing.Mapping[float, tf.Transform]:
+    """
+    Convert a trajectory into a sequence of relative motions
+    :param trajectory:
+    :return:
+    """
+    times = sorted(trajectory.keys())
+    prev_time = times[0]
+    motions = {}
+    for time in times[1:]:
+        motion = trajectory[prev_time].find_relative(trajectory[time])
+        prev_time = time
+        motions[time] = motion
+    return motions
