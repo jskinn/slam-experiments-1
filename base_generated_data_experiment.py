@@ -3,8 +3,10 @@ import logging
 import typing
 import bson
 import os.path
+import numpy as np
 import arvet.util.database_helpers as dh
 import arvet.util.dict_utils as du
+import arvet.util.associate as ass
 import arvet.util.trajectory_helpers as traj_help
 import arvet.database.entity
 import arvet.database.client
@@ -259,6 +261,116 @@ class GeneratedDataExperiment(arvet.batch_analysis.experiment.Experiment):
         :param db_client:
         :return:
         """
+        self._plot_variance_over_time(db_client)
+
+    def _plot_variance_over_time(self, db_client: arvet.database.client.DatabaseClient):
+        import matplotlib.pyplot as pyplot
+
+        colours = ['red', 'green', 'blue', 'cyan', 'gold', 'magenta', 'brown', 'purple', 'orange',
+                   'navy', 'darkkhaki', 'darkgreen', 'crimson']
+        colour_idx = 0
+        colour_map = {}
+
+        save_path = os.path.join('figures', type(self).__name__, 'variance vs time')
+        os.makedirs(save_path, exist_ok=True)
+
+        # Group and print the trajectories for graphing
+        for trajectory_group in self.trajectory_groups.values():
+            logging.getLogger(__name__).info("Plotting variance over time for {0} ...".format(trajectory_group.name))
+
+            # Collect the trial results for each image source in this group
+            for system_name, system_id in self.systems.items():
+
+                # Synthetic data trajectories
+                for world_name, quality_map in trajectory_group.generated_datasets.items():
+                    variance_by_quality = {}
+                    times_by_quality = {}
+
+                    # Collect the
+                    for quality_name, dataset_id in quality_map.items():
+
+                        # Pick a new colour for this quality level
+                        if quality_name not in colour_map:
+                            colour_map[quality_name] = colours[colour_idx]
+                            colour_idx += 1
+
+                        computed_motions = []
+                        timestamps = []
+                        gt_times = None
+                        trial_result_list = self.get_trial_results(system_id, dataset_id)
+
+                        # Collect together the trial results for this quality
+                        for trial_result_id in trial_result_list:
+                            trial_result = dh.load_object(db_client, db_client.trials_collection, trial_result_id)
+                            if trial_result is not None:
+                                if gt_times is None:
+                                    gt_times = sorted(trial_result.get_ground_truth_camera_poses().keys())
+                                motions = th.trajectory_to_motion_sequence(trial_result.get_computed_camera_poses())
+                                computed_motions.append(motions)
+                                timestamps.append({
+                                    k: v for k, v in
+                                    ass.associate({t: 1 for t in gt_times}, motions, max_difference=0.1, offset=0)
+                                })
+
+                        # Now that we have all the trajectories, we can measure consistency
+                        if gt_times is not None and len(computed_motions) > 0 and len(timestamps) > 0:
+                            variance_by_quality[quality_name] = {'x': [], 'y': [], 'z': []}
+                            times_by_quality[quality_name] = []
+
+                            for time in gt_times:
+                                if sum(1 for idx in range(len(timestamps)) if time in timestamps[idx]) <= 1:
+                                    # Skip locations/results which appear in only one trajectory
+                                    continue
+
+                                # Find the mean estimated motion for this time
+                                frame_motions = [
+                                    computed_motions[idx][timestamps[idx][time]].location
+                                    for idx in range(len(computed_motions))
+                                    if time in timestamps[idx] and timestamps[idx][time] in computed_motions[idx]
+                                ]
+                                if len(frame_motions) > 1:
+                                    mean_frame_motion = np.mean(frame_motions, axis=0)
+                                    times_by_quality[quality_name] += [time for _ in range(len(frame_motions))]
+                                    variance_by_quality[quality_name]['x'] += [
+                                        frame_motion[0] - mean_frame_motion[0]
+                                        for frame_motion in frame_motions]
+
+                                    variance_by_quality[quality_name]['y'] += [
+                                        frame_motion[1] - mean_frame_motion[1]
+                                        for frame_motion in frame_motions]
+
+                                    variance_by_quality[quality_name]['z'] += [
+                                        frame_motion[2] - mean_frame_motion[2]
+                                        for frame_motion in frame_motions]
+
+                    if len(times_by_quality) > 0:
+                        title = "{0} on {1} motion estimate variation by quality".format(system_name, world_name)
+                        logging.getLogger(__name__).info("    creating plot \"{0}\"".format(title))
+                        figure = pyplot.figure(figsize=(30, 10), dpi=80)
+                        figure.suptitle(title)
+
+                        lines = {}
+                        for idx, axis in enumerate(['x', 'y', 'z']):
+                            ax = figure.add_subplot(131 + idx)
+                            ax.set_title(axis)
+                            ax.set_xlabel('time (s)')
+                            ax.set_ylabel('{0} variance (m)'.format(axis))
+                            for quality_name, times in times_by_quality.items():
+                                plot_lines = ax.plot(times, variance_by_quality[quality_name][axis],
+                                                     c=colour_map[quality_name], label=quality_name, alpha=0.5,
+                                                     marker='.', markersize=2, linestyle='None')
+                                if quality_name not in lines:
+                                    lines[quality_name] = plot_lines[0]
+
+                        pyplot.figlegend(handles=list(lines.values()), loc='upper right')
+                        pyplot.tight_layout()
+                        pyplot.subplots_adjust(top=0.90, right=0.90)
+
+                        figure.savefig(os.path.join(save_path, title + '.png'))
+                        pyplot.close(figure)
+        pyplot.show()
+
+    def _plot_error_and_trajectories(self, db_client: arvet.database.client.DatabaseClient):
         import matplotlib.pyplot as pyplot
 
         colours = ['red', 'green', 'cyan', 'gold', 'magenta', 'brown', 'purple', 'orange',
@@ -326,7 +438,7 @@ class GeneratedDataExperiment(arvet.batch_analysis.experiment.Experiment):
                                             }))
                 if ground_truth_trajectory is not None:
                     plot_groups.append(('Ground truth', [ground_truth_trajectory], {'c': 'black'}))
-                if show or True:
+                if show:
                     logging.getLogger(__name__).info("    creating plot \"Trajectories for {0} on {1}\"".format(
                         system_name, trajectory_group.name))
                     data_helpers.create_axis_plot(
