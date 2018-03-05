@@ -110,8 +110,8 @@ class OrbslamConsistencyExperiment(arvet.batch_analysis.simple_experiment.Simple
         """
         # Visualize the different trajectories in each group
         self._plot_variance_vs_time(db_client)
-        self._plot_estimate_variance(db_client)
-        self._plot_error_vs_motion(db_client)
+        # self._plot_estimate_variance(db_client)
+        # self._plot_error_vs_motion(db_client)
         # self._plot_variations(db_client)
 
     def _plot_variance_vs_time(self, db_client: arvet.database.client.DatabaseClient):
@@ -132,11 +132,16 @@ class OrbslamConsistencyExperiment(arvet.batch_analysis.simple_experiment.Simple
                 x_variance = []
                 y_variance = []
                 z_variance = []
+                motion_times = []
+                x_motion_variance = []
+                y_motion_variance = []
+                z_motion_variance = []
 
                 trial_result_list = self.get_trial_results(system_id, dataset_id)
                 ground_truth_traj = None
                 gt_scale = None
                 computed_trajectories = []
+                computed_motion_sequences = []
                 timestamps = []
 
                 if len(trial_result_list) <= 0:
@@ -159,36 +164,49 @@ class OrbslamConsistencyExperiment(arvet.batch_analysis.simple_experiment.Simple
                                 logging.getLogger(__name__).warning("Cannot rescale trajectory, missing ground truth")
 
                         computed_trajectories.append(traj)
+                        computed_motion_sequences.append(trajectory_to_motion_sequence(traj))
                         timestamps.append({k: v for k, v in ass.associate(ground_truth_traj, traj,
                                                                           max_difference=0.1, offset=0)})
 
                 # Now that we have all the trajectories, we can measure consistency
-                current_pose = None
                 for time in sorted(ground_truth_traj.keys()):
                     if sum(1 for idx in range(len(timestamps)) if time in timestamps[idx]) <= 1:
                         # Skip locations/results which appear in only one trajectory
                         continue
 
-                    # Find the distance to the prev frame
-                    prev_pose = current_pose
-                    current_pose = ground_truth_traj[time]
-                    if prev_pose is not None:
-                        # Find the mean estimated location for this time
-                        computed_motions = [
-                            prev_pose.find_relative(computed_trajectories[idx][timestamps[idx][time]]).location
-                            for idx in range(len(computed_trajectories))
-                            if time in timestamps[idx]
-                        ]
-                        mean_computed_motion = np.mean(computed_motions, axis=0)
-                        times += [time for _ in range(len(computed_motions))]
-                        x_variance += [computed_motion[0] - mean_computed_motion[0]
-                                       for computed_motion in computed_motions]
-                        y_variance += [computed_motion[1] - mean_computed_motion[1]
-                                       for computed_motion in computed_motions]
-                        z_variance += [computed_motion[2] - mean_computed_motion[2]
-                                       for computed_motion in computed_motions]
+                    # Find the mean estimated location for this time
+                    computed_locations = [
+                        computed_trajectories[idx][timestamps[idx][time]].location
+                        for idx in range(len(computed_trajectories))
+                        if time in timestamps[idx]
+                    ]
+                    if len(computed_locations) > 0:
+                        mean_computed_location = np.mean(computed_locations, axis=0)
+                        times += [time for _ in range(len(computed_locations))]
+                        x_variance += [computed_locations[0] - mean_computed_location[0]
+                                       for computed_locations in computed_locations]
+                        y_variance += [computed_locations[1] - mean_computed_location[1]
+                                       for computed_locations in computed_locations]
+                        z_variance += [computed_locations[2] - mean_computed_location[2]
+                                       for computed_locations in computed_locations]
 
-                # Plot error vs motion in that direction
+                    # Find the mean estimated motion for this time
+                    computed_motions = [
+                        computed_motion_sequences[idx][timestamps[idx][time]].location
+                        for idx in range(len(computed_motion_sequences))
+                        if time in timestamps[idx] and timestamps[idx][time] in computed_motion_sequences[idx]
+                    ]
+                    if len(computed_motions) > 0:
+                        mean_computed_motion = np.mean(computed_motions, axis=0)
+                        motion_times += [time for _ in range(len(computed_motions))]
+                        x_motion_variance += [computed_motion[0] - mean_computed_motion[0]
+                                              for computed_motion in computed_motions]
+                        y_motion_variance += [computed_motion[1] - mean_computed_motion[1]
+                                              for computed_motion in computed_motions]
+                        z_motion_variance += [computed_motion[2] - mean_computed_motion[2]
+                                              for computed_motion in computed_motions]
+
+                # Plot location variance vs time
                 title = "{0} on {1} estimate variation".format(system_name, dataset_name)
                 figure = pyplot.figure(figsize=(30, 10), dpi=80)
                 figure.suptitle(title)
@@ -217,7 +235,7 @@ class OrbslamConsistencyExperiment(arvet.batch_analysis.simple_experiment.Simple
                 figure.savefig(os.path.join(save_path, title + '.png'))
                 pyplot.close(figure)
 
-                # Plot error vs time as a histogram
+                # Plot location variance vs time as a heatmap
                 title = "{0} on {1} estimate variation heatmap".format(system_name, dataset_name)
                 figure = pyplot.figure(figsize=(30, 10), dpi=80)
                 figure.suptitle(title)
@@ -243,6 +261,73 @@ class OrbslamConsistencyExperiment(arvet.batch_analysis.simple_experiment.Simple
                 ax.set_xlabel('time (s)')
                 ax.set_ylabel('z variance (m)')
                 heatmap, xedges, yedges = np.histogram2d(times, z_variance, bins=300)
+                ax.imshow(heatmap.T, extent=[xedges[0], xedges[-1], yedges[0], yedges[-1]], origin='lower',
+                          aspect='auto', cmap=pyplot.get_cmap('inferno_r'))
+
+                pyplot.tight_layout()
+                pyplot.subplots_adjust(top=0.90, right=0.99)
+
+                figure.savefig(os.path.join(save_path, title + '.png'))
+                pyplot.close(figure)
+
+                # Plot computed motion variance vs time
+                title = "{0} on {1} motion estimate variation".format(system_name, dataset_name)
+                figure = pyplot.figure(figsize=(30, 10), dpi=80)
+                figure.suptitle(title)
+
+                ax = figure.add_subplot(131)
+                ax.set_title('x')
+                ax.set_xlabel('time (s)')
+                ax.set_ylabel('x variance (m)')
+                ax.plot(motion_times, x_motion_variance, c='blue', alpha=0.5, marker='.', markersize=2,
+                        linestyle='None')
+
+                ax = figure.add_subplot(132)
+                ax.set_title('y')
+                ax.set_xlabel('time (s)')
+                ax.set_ylabel('y variance (m)')
+                ax.plot(motion_times, y_motion_variance, c='blue', alpha=0.5, marker='.', markersize=2,
+                        linestyle='None')
+
+                ax = figure.add_subplot(133)
+                ax.set_title('z')
+                ax.set_xlabel('time (s)')
+                ax.set_ylabel('z variance (m)')
+                ax.plot(motion_times, z_motion_variance, c='blue', alpha=0.5, marker='.', markersize=2,
+                        linestyle='None')
+
+                pyplot.tight_layout()
+                pyplot.subplots_adjust(top=0.95, right=0.99)
+
+                figure.savefig(os.path.join(save_path, title + '.png'))
+                pyplot.close(figure)
+
+                # Plot computed motion variance vs time as a heatmap
+                title = "{0} on {1} motion estimate variation heatmap".format(system_name, dataset_name)
+                figure = pyplot.figure(figsize=(30, 10), dpi=80)
+                figure.suptitle(title)
+
+                ax = figure.add_subplot(131)
+                ax.set_title('x')
+                ax.set_xlabel('time (s)')
+                ax.set_ylabel('x variance (m)')
+                heatmap, xedges, yedges = np.histogram2d(motion_times, x_motion_variance, bins=300)
+                ax.imshow(heatmap.T, extent=[xedges[0], xedges[-1], yedges[0], yedges[-1]], origin='lower',
+                          aspect='auto', cmap=pyplot.get_cmap('inferno_r'))
+
+                ax = figure.add_subplot(132)
+                ax.set_title('y')
+                ax.set_xlabel('time (s)')
+                ax.set_ylabel('y variance (m)')
+                heatmap, xedges, yedges = np.histogram2d(motion_times, y_motion_variance, bins=300)
+                ax.imshow(heatmap.T, extent=[xedges[0], xedges[-1], yedges[0], yedges[-1]], origin='lower',
+                          aspect='auto', cmap=pyplot.get_cmap('inferno_r'))
+
+                ax = figure.add_subplot(133)
+                ax.set_title('z')
+                ax.set_xlabel('time (s)')
+                ax.set_ylabel('z variance (m)')
+                heatmap, xedges, yedges = np.histogram2d(motion_times, z_motion_variance, bins=300)
                 ax.imshow(heatmap.T, extent=[xedges[0], xedges[-1], yedges[0], yedges[-1]], origin='lower',
                           aspect='auto', cmap=pyplot.get_cmap('inferno_r'))
 
@@ -699,3 +784,19 @@ def quat_diff(q1, q2):
     """
     z0 = q1[0] * q2[0] - q1[1] * q2[1] - q1[2] * q2[2] - q1[3] * q2[3]
     return 2 * np.arccos(min(1, max(-1, z0)))
+
+
+def trajectory_to_motion_sequence(trajectory):
+    """
+    Convert a trajectory into a sequence of relative motions
+    :param trajectory:
+    :return:
+    """
+    times = sorted(trajectory.keys())
+    prev_time = times[0]
+    motions = {}
+    for time in times[1:]:
+        motion = trajectory[prev_time].find_relative(trajectory[time])
+        prev_time = time
+        motions[time] = motion
+    return motions
