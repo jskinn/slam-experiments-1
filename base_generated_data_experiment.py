@@ -3,6 +3,7 @@ import logging
 import typing
 import bson
 import os.path
+import pickle
 import numpy as np
 import arvet.util.database_helpers as dh
 import arvet.util.dict_utils as du
@@ -261,7 +262,306 @@ class GeneratedDataExperiment(arvet.batch_analysis.experiment.Experiment):
         :param db_client:
         :return:
         """
-        self._plot_variance_over_time(db_client)
+        self._plot_big_hammer_covariance(db_client)
+        self._plot_big_hammer_aggregate_stats(db_client)
+
+    def _plot_big_hammer_aggregate_stats(self, db_client: arvet.database.client.DatabaseClient):
+        import matplotlib.pyplot as pyplot
+        import matplotlib.patches as mpatches
+
+        save_path = os.path.join('figures', type(self).__name__, 'real vs virtual aggregate')
+        os.makedirs(save_path, exist_ok=True)
+
+        # Collect the trial results for each image source in this group
+        for system_name, system_id in self.systems.items():
+            real_errors = []
+            virtual_errors = []
+
+            # For each system, collect the error statistics for real and virtual data
+            logging.getLogger(__name__).info("Collecting observations for {0} ...".format(system_name))
+            for trajectory_group in self.trajectory_groups.values():
+                gt_motions = None
+
+                # Real world trajectory
+                trial_result_list = self.get_trial_results(system_id, trajectory_group.reference_dataset)
+                for trial_idx, trial_result_id in enumerate(trial_result_list):
+                    trial_result = dh.load_object(db_client, db_client.trials_collection, trial_result_id)
+                    if trial_result is not None:
+                        if gt_motions is None:
+                            gt_motions = th.trajectory_to_motion_sequence(
+                                trial_result.get_ground_truth_camera_poses())
+                        motions = th.trajectory_to_motion_sequence(trial_result.get_computed_camera_poses())
+                        logging.getLogger(__name__).info(
+                            "    ... adding group \"{0}\" real world trial {1} ({2} total observations)".format(
+                                trajectory_group.name, trial_idx, len(real_errors)))
+                        real_errors += get_errors_for_motions(motions, gt_motions)
+
+                # max quality synthetic data trajectories
+                for world_name, quality_map in trajectory_group.generated_datasets.items():
+                    if 'max quality' in quality_map:
+                        trial_result_list = self.get_trial_results(system_id, quality_map['max quality'])
+                        for trial_idx, trial_result_id in enumerate(trial_result_list):
+                            trial_result = dh.load_object(db_client, db_client.trials_collection, trial_result_id)
+                            if trial_result is not None:
+                                if gt_motions is None:
+                                    gt_motions = th.trajectory_to_motion_sequence(
+                                        trial_result.get_ground_truth_camera_poses())
+                                motions = th.trajectory_to_motion_sequence(trial_result.get_computed_camera_poses())
+                                logging.getLogger(__name__).info(
+                                    "    ... adding group \"{0}\" simulated trial from world {1} "
+                                    "repeat {2} ({3} total observations)".format(
+                                        trajectory_group.name, world_name, trial_idx, len(virtual_errors)
+                                    )
+                                )
+                                virtual_errors += get_errors_for_motions(motions, gt_motions)
+
+            if len(real_errors) > 0 and len(virtual_errors) > 0:
+                real_errors = np.array(real_errors)
+                virtual_errors = np.array(virtual_errors)
+
+                title = "Aggregate real vs virtual errors for {0}".format(system_name)
+                logging.getLogger(__name__).info("    creating plot \"{0}\"".format(title))
+                figure = pyplot.figure(figsize=(14, 10), dpi=80)
+                figure.suptitle(title)
+
+                for idx, error_name in enumerate(['x axis', 'y axis', 'z axis', 'angle']):
+                    ax = figure.add_subplot(221 + idx)
+                    ax.set_title(error_name)
+                    ax.set_xlabel('error')
+                    ax.set_ylabel('frequency')
+                    ax.hist(real_errors[:, idx], bins=200, color='red', alpha=0.5, label='x axis')
+                    ax.hist(virtual_errors[:, idx], bins=200, color='blue', alpha=0.5, label='x axis')
+
+                pyplot.figlegend(handles=[
+                    mpatches.Patch(color='red', alpha=0.5, label='Real Data'),
+                    mpatches.Patch(color='blue', alpha=0.5, label='Virtual Data')
+                ], loc='upper right')
+                pyplot.tight_layout()
+                pyplot.subplots_adjust(top=0.90, right=0.90)
+
+                figure.savefig(os.path.join(save_path, title + '.png'))
+                pyplot.close(figure)
+
+        pyplot.show()
+
+    def _plot_big_hammer_covariance(self, db_client: arvet.database.client.DatabaseClient):
+        import matplotlib.pyplot as pyplot
+
+        trajectory_ids = {}
+        sim_world_ids = {}
+        save_path = os.path.join('figures', type(self).__name__, 'covariance')
+        cache_path = os.path.join('results_cache', type(self).__name__)
+        os.makedirs(save_path, exist_ok=True)
+        os.makedirs(cache_path, exist_ok=True)
+
+        # Collect the trial results for each image source in this group
+        for system_name, system_id in self.systems.items():
+            observations = []
+
+            observations_file = os.path.join(cache_path, 'observations_{0}.pickle'.format(system_name))
+            covariance_file = os.path.join(cache_path, 'covariance_{0}.pickle'.format(system_name))
+
+            # For each system, compute and output the covariance from the observations
+            # Store the computed values on disk for future use as we expect this to take forever
+            if os.path.isfile(observations_file):
+                logging.getLogger(__name__).info("Using cached observations for {0}.".format(system_name))
+                with open(observations_file, 'rb') as cache_file:
+                    observations = pickle.load(cache_file)
+            else:
+                logging.getLogger(__name__).info("Collecting observations for {0} ...".format(system_name))
+                for trajectory_group in self.trajectory_groups.values():
+                    if trajectory_group.name not in trajectory_ids:
+                        trajectory_ids[trajectory_group.name] = len(trajectory_ids)
+
+                    gt_motions = None
+                    # Real world trajectory
+                    trial_result_list = self.get_trial_results(system_id, trajectory_group.reference_dataset)
+                    for trial_idx, trial_result_id in enumerate(trial_result_list):
+                        trial_result = dh.load_object(db_client, db_client.trials_collection, trial_result_id)
+                        if trial_result is not None:
+                            if gt_motions is None:
+                                gt_motions = th.trajectory_to_motion_sequence(
+                                    trial_result.get_ground_truth_camera_poses())
+                            motions = th.trajectory_to_motion_sequence(trial_result.get_computed_camera_poses())
+                            logging.getLogger(__name__).info(
+                                "    ... adding group \"{0}\" real world trial {1} ({2} total observations)".format(
+                                    trajectory_group.name, trial_idx, len(observations)))
+                            observations += get_observations_for_motions(motions, gt_motions,
+                                                                         trajectory_ids[trajectory_group.name], True)
+
+                    # max quality synthetic data trajectories
+                    for world_name, quality_map in trajectory_group.generated_datasets.items():
+                        grouped_world_name = trajectory_group.name + ' ' + world_name
+                        if grouped_world_name not in sim_world_ids:
+                            sim_world_ids[grouped_world_name] = len(sim_world_ids)
+
+                        # For each quality
+                        if 'max quality' in quality_map:
+                            trial_result_list = self.get_trial_results(system_id, quality_map['max quality'])
+                            for trial_idx, trial_result_id in enumerate(trial_result_list):
+                                trial_result = dh.load_object(db_client, db_client.trials_collection, trial_result_id)
+                                if trial_result is not None:
+                                    if gt_motions is None:
+                                        gt_motions = th.trajectory_to_motion_sequence(
+                                            trial_result.get_ground_truth_camera_poses())
+                                    motions = th.trajectory_to_motion_sequence(trial_result.get_computed_camera_poses())
+                                    logging.getLogger(__name__).info(
+                                        "    ... adding group \"{0}\" simulated trial from world {1}"
+                                        "repeat {2} ({3} total observations)".format(
+                                            trajectory_group.name, world_name, trial_idx, len(observations)
+                                        )
+                                    )
+                                    observations += get_observations_for_motions(
+                                        motions, gt_motions, trajectory_ids[trajectory_group.name], False)
+
+                observations = np.array(observations)
+                with open(observations_file, 'wb') as cache_file:
+                    pickle.dump(observations, cache_file, protocol=pickle.HIGHEST_PROTOCOL)
+
+            if os.path.isfile(covariance_file):
+                logging.getLogger(__name__).info("Using cached covariance for {0}.".format(system_name))
+                with open(covariance_file, 'rb') as cache_file:
+                    covariance = pickle.load(cache_file)
+            else:
+                logging.getLogger(__name__).info("Computing covariance for {0} ...".format(system_name))
+                # Normalize the observations so the covariance is more meaningful?
+                observations = (observations - np.mean(observations, axis=0)) / np.std(observations, axis=0)
+                covariance = np.cov(observations.T)
+                with open(covariance_file, 'wb') as cache_file:
+                    pickle.dump(covariance, cache_file, protocol=pickle.HIGHEST_PROTOCOL)
+
+            print('Covariance for {0}'.format(system_name))
+            print('Columns are x error, y error, z error, angle error, time, x motion, y motion, z motion,'
+                  'roll, pitch, yaw, world, is real')
+            print(covariance.tolist())
+
+            figure = pyplot.figure(figsize=(14, 10), dpi=80)
+            figure.suptitle("Covariance for {0}".format(system_name))
+
+            ax = figure.add_subplot(111)
+            labels = ['x error', 'y error', 'z error', 'angle error', 'time', 'x motion', 'y motion', 'z motion',
+                      'roll', 'pitch', 'yaw', 'world', 'world frame', 'is real']
+            # ax.set_xticks([0.5 + i for i in range(covariance.shape[0])])
+            ax.set_xticklabels(labels, rotation='vertical')
+            # ax.set_yticks([0.5 + i for i in range(covariance.shape[1])])
+            ax.set_yticklabels(labels)
+            ax.imshow(covariance.T, aspect='auto', cmap=pyplot.get_cmap('inferno_r'))
+
+            pyplot.tight_layout()
+            pyplot.subplots_adjust(top=0.90, right=0.90)
+
+            figure.savefig(os.path.join(save_path, "Covariance for {0}.png".format(system_name)))
+            pyplot.close(figure)
+
+        pyplot.show()
+
+    def _plot_error_over_time(self, db_client: arvet.database.client.DatabaseClient):
+        import matplotlib.pyplot as pyplot
+
+        colours = ['red', 'green', 'blue', 'cyan', 'gold', 'magenta', 'brown', 'purple', 'orange',
+                   'navy', 'darkkhaki', 'darkgreen', 'crimson']
+        colour_idx = 0
+        colour_map = {}
+
+        save_path = os.path.join('figures', type(self).__name__, 'motion error vs time')
+        os.makedirs(save_path, exist_ok=True)
+
+        # Group and print the trajectories for graphing
+        for trajectory_group in self.trajectory_groups.values():
+            logging.getLogger(__name__).info("Plotting variance over time for {0} ...".format(trajectory_group.name))
+
+            # Collect the trial results for each image source in this group
+            for system_name, system_id in self.systems.items():
+
+                # Synthetic data trajectories
+                for world_name, quality_map in trajectory_group.generated_datasets.items():
+                    error_by_quality = {}
+                    times_by_quality = {}
+
+                    # Collect the
+                    for quality_name, dataset_id in quality_map.items():
+
+                        # Pick a new colour for this quality level
+                        if quality_name not in colour_map:
+                            colour_map[quality_name] = colours[colour_idx]
+                            colour_idx += 1
+
+                        computed_motions = []
+                        timestamps = []
+                        gt_motions = None
+                        trial_result_list = self.get_trial_results(system_id, dataset_id)
+
+                        # Collect together the trial results for this quality
+                        for trial_result_id in trial_result_list:
+                            trial_result = dh.load_object(db_client, db_client.trials_collection, trial_result_id)
+                            if trial_result is not None:
+                                if gt_motions is None:
+                                    gt_motions = th.trajectory_to_motion_sequence(
+                                        trial_result.get_ground_truth_camera_poses())
+                                motions = th.trajectory_to_motion_sequence(trial_result.get_computed_camera_poses())
+                                computed_motions.append(motions)
+                                timestamps.append({
+                                    k: v for k, v in
+                                    ass.associate(gt_motions, motions, max_difference=0.1, offset=0)
+                                })
+
+                        # Now that we have all the trajectories, we can measure consistency
+                        if gt_motions is not None and len(computed_motions) > 0 and len(timestamps) > 0:
+                            error_by_quality[quality_name] = {'x': [], 'y': [], 'z': []}
+                            times_by_quality[quality_name] = []
+
+                            for time in sorted(gt_motions.keys()):
+                                if sum(1 for idx in range(len(timestamps)) if time in timestamps[idx]) <= 1:
+                                    # Skip locations/results which appear in only one trajectory
+                                    continue
+
+                                # Find the mean estimated motion for this time
+                                frame_motions = [
+                                    computed_motions[idx][timestamps[idx][time]].location
+                                    for idx in range(len(computed_motions))
+                                    if time in timestamps[idx] and timestamps[idx][time] in computed_motions[idx]
+                                ]
+                                if len(frame_motions) > 1:
+                                    gt_frame_motion = gt_motions[time].location
+                                    times_by_quality[quality_name] += [time for _ in range(len(frame_motions))]
+                                    error_by_quality[quality_name]['x'] += [
+                                        frame_motion[0] - gt_frame_motion[0]
+                                        for frame_motion in frame_motions]
+
+                                    error_by_quality[quality_name]['y'] += [
+                                        frame_motion[1] - gt_frame_motion[1]
+                                        for frame_motion in frame_motions]
+
+                                    error_by_quality[quality_name]['z'] += [
+                                        frame_motion[2] - gt_frame_motion[2]
+                                        for frame_motion in frame_motions]
+
+                    if len(times_by_quality) > 0:
+                        title = "{0} on {1} motion estimate error by quality".format(system_name, world_name)
+                        logging.getLogger(__name__).info("    creating plot \"{0}\"".format(title))
+                        figure = pyplot.figure(figsize=(30, 10), dpi=80)
+                        figure.suptitle(title)
+
+                        lines = {}
+                        for idx, axis in enumerate(['x', 'y', 'z']):
+                            ax = figure.add_subplot(131 + idx)
+                            ax.set_title(axis)
+                            ax.set_xlabel('time (s)')
+                            ax.set_ylabel('{0} variance (m)'.format(axis))
+                            for quality_name, times in times_by_quality.items():
+                                plot_lines = ax.plot(times, error_by_quality[quality_name][axis],
+                                                     c=colour_map[quality_name], label=quality_name, alpha=0.5,
+                                                     marker='.', markersize=2, linestyle='None')
+                                if quality_name not in lines:
+                                    lines[quality_name] = plot_lines[0]
+
+                        pyplot.figlegend(handles=list(lines.values()), loc='upper right')
+                        pyplot.tight_layout()
+                        pyplot.subplots_adjust(top=0.90, right=0.90)
+
+                        figure.savefig(os.path.join(save_path, title + '.png'))
+                        pyplot.close(figure)
+        pyplot.show()
 
     def _plot_variance_over_time(self, db_client: arvet.database.client.DatabaseClient):
         import matplotlib.pyplot as pyplot
@@ -848,3 +1148,52 @@ def create_error_vs_time_plot(title, results_by_world, save_path=None):
         # figure.savefig(os.path.join(save_path, title + '.svg'))
         figure.savefig(os.path.join(save_path, title + '.png'))
         pyplot.close(figure)
+
+
+def get_observations_for_motions(motions, gt_motions, world_id, real):
+    observations = []
+    max_time = np.max(list(gt_motions.keys()))
+    for gt_time, comp_time in ass.associate(gt_motions, motions, offset=0, max_difference=0.1):
+        trans_err = motions[comp_time].location - gt_motions[gt_time].location
+        observations.append([
+            trans_err[0],
+            trans_err[1],
+            trans_err[2],
+            quat_diff(motions[comp_time].rotation_quat(True), gt_motions[gt_time].rotation_quat(True)),
+            gt_time,
+            gt_motions[gt_time].location[0],
+            gt_motions[gt_time].location[1],
+            gt_motions[gt_time].location[2],
+            gt_motions[gt_time].euler[0],
+            gt_motions[gt_time].euler[1],
+            gt_motions[gt_time].euler[2],
+            world_id,
+            world_id * 1000 + gt_time / max_time,
+            1 if real else 0
+        ])
+    return observations
+
+
+def quat_diff(q1, q2):
+    """
+    Find the angle between two quaternions
+    Basically, we compose them, and derive the angle from the composition
+    :param q1:
+    :param q2:
+    :return:
+    """
+    z0 = q1[0] * q2[0] - q1[1] * q2[1] - q1[2] * q2[2] - q1[3] * q2[3]
+    return 2 * np.arccos(min(1, max(-1, z0)))
+
+
+def get_errors_for_motions(motions, gt_motions):
+    observations = []
+    for gt_time, comp_time in ass.associate(gt_motions, motions, offset=0, max_difference=0.1):
+        trans_err = motions[comp_time].location - gt_motions[gt_time].location
+        observations.append([
+            trans_err[0],
+            trans_err[1],
+            trans_err[2],
+            quat_diff(motions[comp_time].rotation_quat(True), gt_motions[gt_time].rotation_quat(True))
+        ])
+    return observations
