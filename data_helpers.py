@@ -183,3 +183,21 @@ def location_to_json(pose: tf.Transform) -> typing.List[float]:
         pose.location[1],
         pose.location[2]
     ]
+
+
+def compute_window(data: np.ndarray, std_deviations: float = 3.0) -> typing.Tuple[typing.Tuple[float, float], int]:
+    """
+
+    :param data:
+    :param std_deviations:
+    :return:
+    """
+    mean = float(np.mean(data))
+    deviance_from_mean = data - mean
+    median_absolute_deviation = np.median(np.abs(deviance_from_mean))
+    outlier_threshold = std_deviations * median_absolute_deviation
+
+    range_min = np.max((mean - outlier_threshold, np.min(data)))
+    range_max = np.min((mean + outlier_threshold, np.max(data)))
+    return (range_min, range_max), np.count_nonzero(
+        np.multiply(deviance_from_mean, deviance_from_mean) > outlier_threshold * outlier_threshold)

@@ -262,7 +262,7 @@ class GeneratedDataExperiment(arvet.batch_analysis.experiment.Experiment):
         :param db_client:
         :return:
         """
-        self._plot_big_hammer_covariance(db_client)
+        # self._plot_big_hammer_covariance(db_client)
         self._plot_big_hammer_aggregate_stats(db_client)
 
     def _plot_big_hammer_aggregate_stats(self, db_client: arvet.database.client.DatabaseClient):
@@ -270,78 +270,93 @@ class GeneratedDataExperiment(arvet.batch_analysis.experiment.Experiment):
         import matplotlib.patches as mpatches
 
         save_path = os.path.join('figures', type(self).__name__, 'real vs virtual aggregate')
+        cache_path = os.path.join('results_cache', type(self).__name__)
         os.makedirs(save_path, exist_ok=True)
+        os.makedirs(cache_path, exist_ok=True)
 
         # Collect the trial results for each image source in this group
         for system_name, system_id in self.systems.items():
             real_errors = []
             virtual_errors = []
 
+            errors_file = os.path.join(cache_path, 'grouped_errors_{0}.pickle'.format(system_name))
+
             # For each system, collect the error statistics for real and virtual data
-            logging.getLogger(__name__).info("Collecting observations for {0} ...".format(system_name))
-            for trajectory_group in self.trajectory_groups.values():
-                gt_motions = None
+            # Store the computed values on disk for future use as we expect this to take forever
+            if os.path.isfile(errors_file):
+                logging.getLogger(__name__).info("Using cached errors for {0}.".format(system_name))
+                with open(errors_file, 'rb') as cache_file:
+                    real_errors, virtual_errors = pickle.load(cache_file)
+            else:
+                logging.getLogger(__name__).info("Collecting errors for {0} ...".format(system_name))
+                for trajectory_group in self.trajectory_groups.values():
+                    gt_motions = None
 
-                # Real world trajectory
-                trial_result_list = self.get_trial_results(system_id, trajectory_group.reference_dataset)
-                for trial_idx, trial_result_id in enumerate(trial_result_list):
-                    trial_result = dh.load_object(db_client, db_client.trials_collection, trial_result_id)
-                    if trial_result is not None:
-                        if gt_motions is None:
-                            gt_motions = th.trajectory_to_motion_sequence(
-                                trial_result.get_ground_truth_camera_poses())
-                        motions = th.trajectory_to_motion_sequence(trial_result.get_computed_camera_poses())
-                        logging.getLogger(__name__).info(
-                            "    ... adding group \"{0}\" real world trial {1} ({2} total observations)".format(
-                                trajectory_group.name, trial_idx, len(real_errors)))
-                        real_errors += get_errors_for_motions(motions, gt_motions)
+                    # Real world trajectory
+                    trial_result_list = self.get_trial_results(system_id, trajectory_group.reference_dataset)
+                    for trial_idx, trial_result_id in enumerate(trial_result_list):
+                        trial_result = dh.load_object(db_client, db_client.trials_collection, trial_result_id)
+                        if trial_result is not None:
+                            if gt_motions is None:
+                                gt_motions = th.trajectory_to_motion_sequence(
+                                    trial_result.get_ground_truth_camera_poses())
+                            motions = th.trajectory_to_motion_sequence(trial_result.get_computed_camera_poses())
+                            logging.getLogger(__name__).info(
+                                "    ... adding group \"{0}\" real world trial {1} ({2} total points)".format(
+                                    trajectory_group.name, trial_idx, len(real_errors)))
+                            real_errors += get_errors_for_motions(motions, gt_motions)
 
-                # max quality synthetic data trajectories
-                for world_name, quality_map in trajectory_group.generated_datasets.items():
-                    if 'max quality' in quality_map:
-                        trial_result_list = self.get_trial_results(system_id, quality_map['max quality'])
-                        for trial_idx, trial_result_id in enumerate(trial_result_list):
-                            trial_result = dh.load_object(db_client, db_client.trials_collection, trial_result_id)
-                            if trial_result is not None:
-                                if gt_motions is None:
-                                    gt_motions = th.trajectory_to_motion_sequence(
-                                        trial_result.get_ground_truth_camera_poses())
-                                motions = th.trajectory_to_motion_sequence(trial_result.get_computed_camera_poses())
-                                logging.getLogger(__name__).info(
-                                    "    ... adding group \"{0}\" simulated trial from world {1} "
-                                    "repeat {2} ({3} total observations)".format(
-                                        trajectory_group.name, world_name, trial_idx, len(virtual_errors)
+                    # max quality synthetic data trajectories
+                    for world_name, quality_map in trajectory_group.generated_datasets.items():
+                        if 'max quality' in quality_map:
+                            trial_result_list = self.get_trial_results(system_id, quality_map['max quality'])
+                            for trial_idx, trial_result_id in enumerate(trial_result_list):
+                                trial_result = dh.load_object(db_client, db_client.trials_collection, trial_result_id)
+                                if trial_result is not None:
+                                    if gt_motions is None:
+                                        gt_motions = th.trajectory_to_motion_sequence(
+                                            trial_result.get_ground_truth_camera_poses())
+                                    motions = th.trajectory_to_motion_sequence(trial_result.get_computed_camera_poses())
+                                    logging.getLogger(__name__).info(
+                                        "    ... adding group \"{0}\" simulated trial from world {1} "
+                                        "repeat {2} ({3} total points)".format(
+                                            trajectory_group.name, world_name, trial_idx, len(virtual_errors)
+                                        )
                                     )
-                                )
-                                virtual_errors += get_errors_for_motions(motions, gt_motions)
+                                    virtual_errors += get_errors_for_motions(motions, gt_motions)
+                with open(errors_file, 'wb') as cache_file:
+                    pickle.dump((real_errors, virtual_errors), cache_file, protocol=pickle.HIGHEST_PROTOCOL)
 
             if len(real_errors) > 0 and len(virtual_errors) > 0:
                 real_errors = np.array(real_errors)
                 virtual_errors = np.array(virtual_errors)
 
-                title = "Aggregate real vs virtual errors for {0}".format(system_name)
+                title = "Aggregate real vs virtual errors for {0} (central 3 standard deviations)".format(system_name)
                 logging.getLogger(__name__).info("    creating plot \"{0}\"".format(title))
                 figure = pyplot.figure(figsize=(14, 10), dpi=80)
                 figure.suptitle(title)
 
                 for idx, error_name in enumerate(['x axis', 'y axis', 'z axis', 'angle']):
+                    real_range, real_outliers = data_helpers.compute_window(real_errors[:, idx], std_deviations=3)
+                    virtual_range, virtual_outliers = data_helpers.compute_window(virtual_errors[:, idx],
+                                                                                  std_deviations=3)
                     ax = figure.add_subplot(221 + idx)
                     ax.set_title(error_name)
-                    ax.set_xlabel('error')
-                    ax.set_ylabel('frequency')
-                    ax.hist(real_errors[:, idx], bins=200, color='red', alpha=0.5, label='x axis')
-                    ax.hist(virtual_errors[:, idx], bins=200, color='blue', alpha=0.5, label='x axis')
+                    ax.set_xlabel('error ({0} real outliers, {1} virtual outliers)'.format(real_outliers,
+                                                                                           virtual_outliers))
+                    ax.set_ylabel('density')
+                    ax.hist(real_errors[:, idx], normed=1, bins=1000, color='red', alpha=0.5, range=real_range)
+                    ax.hist(virtual_errors[:, idx], normed=1, bins=1000, color='blue', alpha=0.5, range=virtual_range)
 
                 pyplot.figlegend(handles=[
                     mpatches.Patch(color='red', alpha=0.5, label='Real Data'),
                     mpatches.Patch(color='blue', alpha=0.5, label='Virtual Data')
                 ], loc='upper right')
                 pyplot.tight_layout()
-                pyplot.subplots_adjust(top=0.90, right=0.90)
+                pyplot.subplots_adjust(top=0.90, right=0.99)
 
                 figure.savefig(os.path.join(save_path, title + '.png'))
                 pyplot.close(figure)
-
         pyplot.show()
 
     def _plot_big_hammer_covariance(self, db_client: arvet.database.client.DatabaseClient):
@@ -349,7 +364,7 @@ class GeneratedDataExperiment(arvet.batch_analysis.experiment.Experiment):
 
         trajectory_ids = {}
         sim_world_ids = {}
-        save_path = os.path.join('figures', type(self).__name__, 'covariance')
+        save_path = os.path.join('figures', type(self).__name__, 'correlation')
         cache_path = os.path.join('results_cache', type(self).__name__)
         os.makedirs(save_path, exist_ok=True)
         os.makedirs(cache_path, exist_ok=True)
@@ -425,32 +440,35 @@ class GeneratedDataExperiment(arvet.batch_analysis.experiment.Experiment):
             else:
                 logging.getLogger(__name__).info("Computing covariance for {0} ...".format(system_name))
                 # Normalize the observations so the covariance is more meaningful?
-                observations = (observations - np.mean(observations, axis=0)) / np.std(observations, axis=0)
                 covariance = np.cov(observations.T)
                 with open(covariance_file, 'wb') as cache_file:
                     pickle.dump(covariance, cache_file, protocol=pickle.HIGHEST_PROTOCOL)
 
+            std_deviations = np.std(observations, axis=0)
+            correlation = np.divide(covariance, np.outer(std_deviations, std_deviations))
             print('Covariance for {0}'.format(system_name))
             print('Columns are x error, y error, z error, angle error, time, x motion, y motion, z motion,'
                   'roll, pitch, yaw, world, is real')
             print(covariance.tolist())
+            print('Correlation for {0}'.format(system_name))
+            print(correlation.tolist())
 
             figure = pyplot.figure(figsize=(14, 10), dpi=80)
-            figure.suptitle("Covariance for {0}".format(system_name))
+            figure.suptitle("Correlation for {0}".format(system_name))
 
             ax = figure.add_subplot(111)
             labels = ['x error', 'y error', 'z error', 'angle error', 'time', 'x motion', 'y motion', 'z motion',
                       'roll', 'pitch', 'yaw', 'world', 'world frame', 'is real']
-            # ax.set_xticks([0.5 + i for i in range(covariance.shape[0])])
+            ax.set_xticks([i for i in range(covariance.shape[0])])
             ax.set_xticklabels(labels, rotation='vertical')
-            # ax.set_yticks([0.5 + i for i in range(covariance.shape[1])])
+            ax.set_yticks([i for i in range(covariance.shape[1])])
             ax.set_yticklabels(labels)
-            ax.imshow(covariance.T, aspect='auto', cmap=pyplot.get_cmap('inferno_r'))
+            ax.imshow(correlation.T, aspect='auto', cmap=pyplot.get_cmap('inferno_r'))
 
             pyplot.tight_layout()
-            pyplot.subplots_adjust(top=0.90, right=0.90)
+            pyplot.subplots_adjust(top=0.90, right=0.99)
 
-            figure.savefig(os.path.join(save_path, "Covariance for {0}.png".format(system_name)))
+            figure.savefig(os.path.join(save_path, "Correlation for {0}.png".format(system_name)))
             pyplot.close(figure)
 
         pyplot.show()
