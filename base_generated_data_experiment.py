@@ -1177,7 +1177,7 @@ def get_observations_for_motions(motions, gt_motions, world_id, real):
             trans_err[0],
             trans_err[1],
             trans_err[2],
-            quat_diff(motions[comp_time].rotation_quat(True), gt_motions[gt_time].rotation_quat(True)),
+            data_helpers.quat_diff(motions[comp_time].rotation_quat(True), gt_motions[gt_time].rotation_quat(True)),
             gt_time,
             gt_motions[gt_time].location[0],
             gt_motions[gt_time].location[1],
@@ -1192,18 +1192,6 @@ def get_observations_for_motions(motions, gt_motions, world_id, real):
     return observations
 
 
-def quat_diff(q1, q2):
-    """
-    Find the angle between two quaternions
-    Basically, we compose them, and derive the angle from the composition
-    :param q1:
-    :param q2:
-    :return:
-    """
-    z0 = q1[0] * q2[0] - q1[1] * q2[1] - q1[2] * q2[2] - q1[3] * q2[3]
-    return 2 * np.arccos(min(1, max(-1, z0)))
-
-
 def get_errors_for_motions(motions, gt_motions):
     observations = []
     for gt_time, comp_time in ass.associate(gt_motions, motions, offset=0, max_difference=0.1):
@@ -1212,6 +1200,6 @@ def get_errors_for_motions(motions, gt_motions):
             trans_err[0],
             trans_err[1],
             trans_err[2],
-            quat_diff(motions[comp_time].rotation_quat(True), gt_motions[gt_time].rotation_quat(True))
+            data_helpers.quat_diff(motions[comp_time].rotation_quat(True), gt_motions[gt_time].rotation_quat(True))
         ])
     return observations
