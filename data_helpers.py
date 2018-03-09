@@ -220,7 +220,15 @@ def quat_diff(q1, q2):
     :param q2:
     :return:
     """
-    z0 = q1[0] * q2[0] - q1[1] * q2[1] - q1[2] * q2[2] - q1[3] * q2[3]
+    q1 = np.asarray(q1)
+    if np.dot(q1, q2) < 0:
+        # Quaternions have opposite handedness, flip q1 since it's already an ndarray
+        q1 = -1 * q1
+    q_inv = q1 * np.array([1.0, -1.0, -1.0, -1.0])
+    q_inv = q_inv / np.dot(q_inv, q_inv)
+
+    # We only coare about the scalar component, compose only that
+    z0 = q_inv[0] * q2[0] - q_inv[1] * q2[1] - q_inv[2] * q2[2] - q_inv[3] * q2[3]
     return 2 * float(np.arccos(min(1, max(-1, z0))))
 
 
@@ -232,13 +240,43 @@ def quat_mean(quaternions):
     """
     if len(quaternions) <= 0:
         return np.nan
-    q_mat = np.asarray(quaternions)
-    product = np.dot(q_mat.T, q_mat)
-    evals, evecs = np.linalg.eig(product)
-    best = -1
-    result = None
-    for idx in range(len(evals)):
-        if evals[idx] > best:
-            best = evals[idx]
-            result = evecs[idx]
-    return result
+    elif len(quaternions) == 1:
+        # Only one quaternion, it is the average of itself
+        return quaternions[0]
+    elif len(quaternions) == 2:
+        # We have weird errors for 2 quaternions using the matrix
+        # We use the closed form solution given in
+        # https://ntrs.nasa.gov/archive/nasa/casi.ntrs.nasa.gov/20070017872.pdf
+        q1 = np.asarray(quaternions[0])
+        q2 = np.asarray(quaternions[1])
+        dot = np.dot(q1, q2)
+        if dot < 0:
+            # The vectors don't have the same handedness, invert one
+            q2 = -1 * q2
+            dot = -dot
+        if dot == 0:
+            if q1[0] > q2[0]:
+                return q1
+            return q2
+        z = np.sqrt((q1[0] - q2[2]) * (q1[0] - q2[2]) + 4 * q1[0] * q2[0] * dot * dot)
+        result = 2 * q1[0] * dot * q1 + (q2[0] - q1[0] + z) * q2
+        return result / np.linalg.norm(result)
+    else:
+        # Quaternion average from the eigenvectors of the sum matrix
+        # See: https://ntrs.nasa.gov/archive/nasa/casi.ntrs.nasa.gov/20070017872.pdf
+        # We have at least 3 quaternions, make sure they're of the same handedness
+        q_mat = np.asarray([
+            q if np.dot(q, quaternions[0]) > 0 else -1 * np.asarray(q)
+            for q in quaternions
+        ])
+        product = np.dot(q_mat.T, q_mat)    # Computes sum([q * q.T for q in quaterions])
+        evals, evecs = np.linalg.eig(product)
+        best = -1
+        result = None
+        for idx in range(len(evals)):
+            if evals[idx] > best:
+                best = evals[idx]
+                result = evecs[idx]
+        if np.any(np.iscomplex(result)):
+            print("Error highest eigenvector is complex")
+        return result

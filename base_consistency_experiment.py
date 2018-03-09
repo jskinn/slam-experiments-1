@@ -38,11 +38,162 @@ class BaseConsistencyExperiment(arvet.batch_analysis.simple_experiment.SimpleExp
         :return:
         """
         # Visualize the different trajectories in each group
-        self._compute_error_vs_motion_correlation(db_client)
+        self._plot_error_vs_motion(db_client)
+        # self._compute_error_vs_motion_correlation(db_client)
         # self._plot_variance_vs_time(db_client)
         # self._plot_estimate_variance(db_client)
         # self._plot_error_vs_motion(db_client)
         # self._plot_variations(db_client)
+
+    def _plot_error_vs_motion(self, db_client: arvet.database.client.DatabaseClient):
+        import matplotlib.pyplot as pyplot
+
+        save_path = os.path.join('figures', type(self).__name__, 'errors vs motions')
+        os.makedirs(save_path, exist_ok=True)
+
+        logging.getLogger(__name__).info("Plotting error vs time and saving to {0} ...".format(save_path))
+
+        for dataset_name, dataset_id in self.datasets.items():
+            for system_name, system_id in self.systems.items():
+                logging.getLogger(__name__).info("    .... distributions for {0} on {1}".format(system_name,
+                                                                                                dataset_name))
+                times = []
+                motion_distances = []
+                rotation_angles = []
+                motion_errors = []
+                mean_motion_errors = []
+                rotation_errors = []
+                mean_rotation_errors = []
+                motion_noise = []
+                rotation_noise = []
+
+                trial_result_list = self.get_trial_results(system_id, dataset_id)
+                ground_truth_motions = None
+                gt_scale = None
+                computed_motion_sequences = []
+                timestamps = []
+
+                if len(trial_result_list) <= 0:
+                    continue
+
+                # Collect all the trial results
+                for trial_result_id in trial_result_list:
+                    trial_result = dh.load_object(db_client, db_client.trials_collection, trial_result_id)
+                    if trial_result is not None and trial_result.success:
+                        if ground_truth_motions is None:
+                            ground_truth_motions = trial_result.get_ground_truth_camera_poses()
+                            gt_scale = th.find_trajectory_scale(ground_truth_motions)
+                            ground_truth_motions = th.trajectory_to_motion_sequence(ground_truth_motions)
+                        traj = trial_result.get_computed_camera_poses()
+
+                        # Normalize monocular trajectories
+                        if 'mono' in system_name.lower():
+                            if gt_scale is not None:
+                                traj = th.rescale_trajectory(traj, gt_scale)
+                            else:
+                                logging.getLogger(__name__).warning("Cannot rescale trajectory, missing ground truth")
+                        computed_motion_sequences.append(th.trajectory_to_motion_sequence(traj))
+                        timestamps.append({k: v for k, v in ass.associate(ground_truth_motions, traj,
+                                                                          max_difference=0.1, offset=0)})
+
+                # Now that we have all the trajectories, we can measure consistency
+                for time in sorted(ground_truth_motions.keys()):
+                    if sum(1 for idx in range(len(timestamps)) if time in timestamps[idx]) <= 1:
+                        # Skip locations/results which appear in only one trajectory
+                        continue
+
+                    # Find the mean estimated motion for this time
+                    computed_motions = [
+                        computed_motion_sequences[idx][timestamps[idx][time]].location
+                        for idx in range(len(computed_motion_sequences))
+                        if time in timestamps[idx] and timestamps[idx][time] in computed_motion_sequences[idx]
+                    ]
+                    computed_rotations = [
+                        computed_motion_sequences[idx][timestamps[idx][time]].rotation_quat(True)
+                        for idx in range(len(computed_motion_sequences))
+                        if time in timestamps[idx] and timestamps[idx][time] in computed_motion_sequences[idx]
+                    ]
+                    assert len(computed_motions) == len(computed_rotations)
+                    if len(computed_motions) > 0:
+                        mean_computed_motion = np.mean(computed_motions, axis=0)
+                        mean_computed_rotation = data_helpers.quat_mean(computed_rotations)
+                        times += [time for _ in range(len(computed_motions))]
+                        motion_distances += [
+                            np.linalg.norm(ground_truth_motions[time].location)
+                            for _ in range(len(computed_motions))
+                        ]
+                        rotation_angles += [
+                            data_helpers.quat_angle(ground_truth_motions[time].rotation_quat(True))
+                            for _ in range(len(computed_rotations))
+                        ]
+                        motion_errors += [
+                            np.linalg.norm(computed_motion - ground_truth_motions[time].location)
+                            for computed_motion in computed_motions
+                        ]
+                        motion_noise += [
+                            np.linalg.norm(computed_motion - mean_computed_motion)
+                            for computed_motion in computed_motions
+                        ]
+                        mean_motion_errors += [
+                            np.linalg.norm(mean_computed_motion - ground_truth_motions[time].location)
+                            for _ in range(len(computed_motions))
+                        ]
+                        rotation_errors += [
+                            data_helpers.quat_diff(computed_rotation, ground_truth_motions[time].rotation_quat(True))
+                            for computed_rotation in computed_rotations
+                        ]
+                        rotation_noise += [
+                            data_helpers.quat_diff(computed_rotation, mean_computed_rotation)
+                            for computed_rotation in computed_rotations
+                        ]
+                        mean_rotation_errors += [
+                            data_helpers.quat_diff(mean_computed_rotation,
+                                                   ground_truth_motions[time].rotation_quat(True))
+                            for _ in range(len(computed_rotations))
+                        ]
+
+                # Plot every combination of motion vs error as a plot and a heatmap
+                figure, axes = pyplot.subplots(12, 2, squeeze=False,
+                                               figsize=(14, 66), dpi=80)
+                fig_title = '{0} on {1} errors vs motions.png'.format(system_name, dataset_name)
+                figure.suptitle(fig_title)
+                plot_idx = 0
+                for x_title_name, x_axis_name, x_data in [
+                    ('motion', 'distance moved (m)', np.array(motion_distances)),
+                    ('rotation', 'angle rotated (rad)', np.array(rotation_angles))
+                ]:
+                    for y_title_name, y_axis_name, y_data in [
+                        ('motion error', 'motion error (m)', np.array(motion_errors)),
+                        ('motion noise', 'motion noise (m)', np.array(motion_noise)),
+                        ('mean motion error', 'mean motion error (m)', np.array(mean_motion_errors)),
+                        ('rotation error', 'rotation error (rad)', np.array(rotation_errors)),
+                        ('rotation noise', 'rotation noise (rad)', np.array(rotation_noise)),
+                        ('mean rotation error', 'mean rotation error (rad)', np.array(mean_rotation_errors)),
+                    ]:
+                        x_limits, x_outliers = data_helpers.compute_window(x_data, std_deviations=4)
+                        y_limits, y_outliers = data_helpers.compute_window(y_data, std_deviations=4)
+
+                        ax = axes[plot_idx][0]
+                        ax.set_title("{0} vs {1}".format(y_title_name, x_title_name))
+                        ax.set_xlim(x_limits)
+                        ax.set_ylim(y_limits)
+                        ax.set_xlabel(x_axis_name + " ({0} outliers)".format(x_outliers))
+                        ax.set_ylabel(y_axis_name + " ({0} outliers)".format(y_outliers))
+                        ax.plot(x_data, y_data, c='blue', alpha=0.5, marker='.', markersize=2, linestyle='None')
+
+                        ax = axes[plot_idx][1]
+                        ax.set_title("{0} vs {1} histogram".format(y_title_name, x_title_name))
+                        ax.set_xlabel(x_axis_name + " ({0} outliers)".format(x_outliers))
+                        ax.set_ylabel(y_axis_name + " ({0} outliers)".format(y_outliers))
+                        heatmap, xedges, yedges = np.histogram2d(x_data, y_data, bins=300, range=[x_limits, y_limits])
+                        ax.imshow(heatmap.T, extent=[xedges[0], xedges[-1], yedges[0], yedges[-1]], origin='lower',
+                                  aspect='auto', cmap=pyplot.get_cmap('inferno_r'))
+
+                        plot_idx += 1
+                pyplot.tight_layout()
+                pyplot.subplots_adjust(top=0.98, right=0.99)
+                figure.savefig(os.path.join(save_path, fig_title + '.png'))
+                pyplot.close(figure)
 
     def _compute_error_vs_motion_correlation(self, db_client: arvet.database.client.DatabaseClient):
         import matplotlib.pyplot as pyplot
@@ -601,7 +752,7 @@ class BaseConsistencyExperiment(arvet.batch_analysis.simple_experiment.SimpleExp
         # Show all the graphs remaining
         pyplot.show()
 
-    def _plot_error_vs_motion(self, db_client: arvet.database.client.DatabaseClient):
+    def _plot_absolute_error_vs_motion(self, db_client: arvet.database.client.DatabaseClient):
         import matplotlib.pyplot as pyplot
         # noinspection PyUnresolvedReferences
         from mpl_toolkits.mplot3d import Axes3D
