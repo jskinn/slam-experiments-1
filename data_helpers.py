@@ -201,3 +201,44 @@ def compute_window(data: np.ndarray, std_deviations: float = 3.0) -> typing.Tupl
     range_max = np.min((mean + outlier_threshold, np.max(data)))
     return (range_min, range_max), np.count_nonzero(
         np.multiply(deviance_from_mean, deviance_from_mean) > outlier_threshold * outlier_threshold)
+
+
+def quat_angle(quat):
+    """
+    Get the angle of rotation indicated by a quaternion, independent of axis
+    :param quat:
+    :return:
+    """
+    return 2 * float(np.arccos(min(1, max(-1, quat[0]))))
+
+
+def quat_diff(q1, q2):
+    """
+    Find the angle between two quaternions
+    Basically, we compose them, and derive the angle from the composition
+    :param q1:
+    :param q2:
+    :return:
+    """
+    z0 = q1[0] * q2[0] - q1[1] * q2[1] - q1[2] * q2[2] - q1[3] * q2[3]
+    return 2 * float(np.arccos(min(1, max(-1, z0))))
+
+
+def quat_mean(quaternions):
+    """
+    Find the mean of a bunch of quaternions
+    :param quaternions:
+    :return:
+    """
+    if len(quaternions) <= 0:
+        return np.nan
+    q_mat = np.asarray(quaternions)
+    product = np.dot(q_mat.T, q_mat)
+    evals, evecs = np.linalg.eig(product)
+    best = -1
+    result = None
+    for idx in range(len(evals)):
+        if evals[idx] > best:
+            best = evals[idx]
+            result = evecs[idx]
+    return result

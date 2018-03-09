@@ -38,39 +38,208 @@ class BaseConsistencyExperiment(arvet.batch_analysis.simple_experiment.SimpleExp
         :return:
         """
         # Visualize the different trajectories in each group
-        self._plot_variance_vs_time(db_client)
+        self._compute_error_vs_motion_correlation(db_client)
+        # self._plot_variance_vs_time(db_client)
         # self._plot_estimate_variance(db_client)
         # self._plot_error_vs_motion(db_client)
         # self._plot_variations(db_client)
 
-    def _plot_variance_vs_time(self, db_client: arvet.database.client.DatabaseClient):
+    def _compute_error_vs_motion_correlation(self, db_client: arvet.database.client.DatabaseClient):
         import matplotlib.pyplot as pyplot
-        # noinspection PyUnresolvedReferences
-        from mpl_toolkits.mplot3d import Axes3D
 
-        save_path = os.path.join('figures', type(self).__name__, 'variance vs time')
+        save_path = os.path.join('figures', type(self).__name__, 'covariance and correlation')
         os.makedirs(save_path, exist_ok=True)
 
-        logging.getLogger(__name__).info("Plotting variance vs time and saving to {0} ...".format(save_path))
+        logging.getLogger(__name__).info("Plotting correlation and saving to {0} ...".format(save_path))
+        for system_name, system_id in self.systems.items():
+            sample_observations = []
+            aggregate_observations = []
+
+            for dataset_name, dataset_id in self.datasets.items():
+                logging.getLogger(__name__).info("    .... distributions for {0} on {1}".format(system_name,
+                                                                                                dataset_name))
+
+                trial_result_list = self.get_trial_results(system_id, dataset_id)
+                ground_truth_motions = None
+                gt_scale = None
+                computed_motion_sequences = []
+                timestamps = []
+
+                if len(trial_result_list) <= 0:
+                    continue
+
+                # Collect all the trial results
+                for trial_result_id in trial_result_list:
+                    trial_result = dh.load_object(db_client, db_client.trials_collection, trial_result_id)
+                    if trial_result is not None and trial_result.success:
+                        if ground_truth_motions is None:
+                            ground_truth_motions = trial_result.get_ground_truth_camera_poses()
+                            gt_scale = th.find_trajectory_scale(ground_truth_motions)
+                            ground_truth_motions = th.trajectory_to_motion_sequence(ground_truth_motions)
+                        traj = trial_result.get_computed_camera_poses()
+
+                        # Normalize monocular trajectories
+                        if 'mono' in system_name.lower():
+                            if gt_scale is not None:
+                                traj = th.rescale_trajectory(traj, gt_scale)
+                            else:
+                                logging.getLogger(__name__).warning("Cannot rescale trajectory, missing ground truth")
+
+                        computed_motion_sequences.append(th.trajectory_to_motion_sequence(traj))
+                        timestamps.append({k: v for k, v in ass.associate(ground_truth_motions, traj,
+                                                                          max_difference=0.1, offset=0)})
+
+                # Now that we have all the trajectories, we can measure consistency
+                for time in sorted(ground_truth_motions.keys()):
+                    if sum(1 for idx in range(len(timestamps)) if time in timestamps[idx]) <= 1:
+                        # Skip locations/results which appear in only one trajectory
+                        continue
+
+                    # Find the mean estimated motion for this time
+                    computed_motions = [
+                        computed_motion_sequences[idx][timestamps[idx][time]].location
+                        for idx in range(len(computed_motion_sequences))
+                        if time in timestamps[idx] and timestamps[idx][time] in computed_motion_sequences[idx]
+                    ]
+                    computed_rotations = [
+                        computed_motion_sequences[idx][timestamps[idx][time]].rotation_quat(True)
+                        for idx in range(len(computed_motion_sequences))
+                        if time in timestamps[idx] and timestamps[idx][time] in computed_motion_sequences[idx]
+                    ]
+                    if len(computed_motions) > 0:
+                        gt_motion = ground_truth_motions[time].location
+                        gt_rotation = ground_truth_motions[time].rotation_quat(True)
+                        mean_computed_motion = np.mean(computed_motions, axis=0)
+                        mean_computed_rotation = data_helpers.quat_mean(computed_rotations)
+                        std_computed_motion = np.std(computed_motions, axis=0)
+
+                        aggregate_observations.append([
+                            std_computed_motion[0],
+                            std_computed_motion[1],
+                            std_computed_motion[2],
+                            mean_computed_motion[0],
+                            mean_computed_motion[1],
+                            mean_computed_motion[2],
+                            data_helpers.quat_angle(mean_computed_rotation),
+                            gt_motion[0],
+                            gt_motion[1],
+                            gt_motion[2],
+                            data_helpers.quat_angle(gt_rotation)
+                        ])
+
+                        for idx, computed_motion in enumerate(computed_motions):
+                            trans_error = computed_motion - gt_motion
+                            rot_error = data_helpers.quat_diff(computed_rotations[idx], gt_rotation)
+                            trans_variance = computed_motion - mean_computed_motion
+                            rot_variance = data_helpers.quat_diff(computed_rotations[idx], mean_computed_rotation)
+                            sample_observations.append([
+                                trans_error[0],
+                                trans_error[1],
+                                trans_error[2],
+                                rot_error,
+                                trans_variance[0],
+                                trans_variance[1],
+                                trans_variance[2],
+                                rot_variance,
+                                mean_computed_motion[0],
+                                mean_computed_motion[1],
+                                mean_computed_motion[2],
+                                data_helpers.quat_angle(mean_computed_rotation),
+                                gt_motion[0],
+                                gt_motion[1],
+                                gt_motion[2],
+                                data_helpers.quat_angle(gt_rotation)
+                            ])
+            aggregate_observations = np.array(aggregate_observations, dtype=np.float)
+            sample_observations = np.array(sample_observations, dtype=np.float)
+
+            aggregate_covariance = np.cov(aggregate_observations.T)
+            sample_covariance = np.cov(sample_observations.T)
+
+            std_deviations = np.std(aggregate_observations, axis=0)
+            aggregate_correlation = np.divide(aggregate_covariance, np.outer(std_deviations, std_deviations))
+
+            std_deviations = np.std(sample_observations, axis=0)
+            sample_correlation = np.divide(sample_covariance, np.outer(std_deviations, std_deviations))
+
+            print("Correlation for aggregate statistics")
+            print("Rows/columns are std_x, std_y, std_z, mean_computed_x, mean_computed_y, mean_computed_x, "
+                  "mean_computed_rot, actual_x, actual_y, actual_z, actual_rot")
+            print(aggregate_correlation.tolist())
+
+            print("Correlation for per sample statistics")
+            print("Rows/columns are x_error, y_error, z_error, rot_error, x_variance, y_variance, z_variance, "
+                  "rot_variance, mean_computed_y, mean_computed_x, mean_computed_rot, actual_x, actual_y, "
+                  "actual_z, actual_rot")
+            print(sample_correlation.tolist())
+
+            # Plot aggregate correlation to motion
+            figure = pyplot.figure(figsize=(14, 10), dpi=80)
+            figure.suptitle("Aggregate statistic correlation for {0}".format(system_name))
+
+            ax = figure.add_subplot(111)
+            labels = ['std x', 'std y', 'std z', 'comp x motion', 'comp y motion', 'comp z motion', 'comp rotation',
+                      'x motion', 'y motion', 'z motion', 'rotation']
+            ax.set_xticks([i for i in range(aggregate_correlation.shape[0])])
+            ax.set_xticklabels(labels, rotation='vertical')
+            ax.set_yticks([i for i in range(aggregate_correlation.shape[1])])
+            ax.set_yticklabels(labels)
+            ax.imshow(aggregate_correlation.T, aspect='auto', cmap=pyplot.get_cmap('inferno_r'))
+
+            pyplot.tight_layout()
+            pyplot.subplots_adjust(top=0.90, right=0.99)
+
+            figure.savefig(os.path.join(save_path, "Aggregate statistic correlation for {0}.png".format(system_name)))
+            pyplot.close(figure)
+
+            # Plot sample correlation to motion
+            figure = pyplot.figure(figsize=(14, 10), dpi=80)
+            figure.suptitle("Sample statistic correlation for {0}".format(system_name))
+
+            ax = figure.add_subplot(111)
+            labels = ['x error', 'y error', 'z error', 'rot error', 'x variance', 'y variance', 'z variance',
+                      'rot variance', 'comp x motion', 'comp y motion', 'comp z motion', 'comp rotation',
+                      'x motion', 'y motion', 'z motion', 'rotation']
+            ax.set_xticks([i for i in range(sample_correlation.shape[0])])
+            ax.set_xticklabels(labels, rotation='vertical')
+            ax.set_yticks([i for i in range(sample_correlation.shape[1])])
+            ax.set_yticklabels(labels)
+            ax.imshow(sample_correlation.T, aspect='auto', cmap=pyplot.get_cmap('inferno_r'))
+
+            pyplot.tight_layout()
+            pyplot.subplots_adjust(top=0.90, right=0.99)
+
+            figure.savefig(os.path.join(save_path, "Sample statistic correlation for {0}.png".format(system_name)))
+            pyplot.close(figure)
+        pyplot.show()
+
+    def _plot_variance_vs_time(self, db_client: arvet.database.client.DatabaseClient):
+        import matplotlib.pyplot as pyplot
+
+        variance_save_path = os.path.join('figures', type(self).__name__, 'variance vs time')
+        error_save_path = os.path.join('figures', type(self).__name__, 'motion error vs time')
+        os.makedirs(variance_save_path, exist_ok=True)
+        os.makedirs(error_save_path, exist_ok=True)
+
+        logging.getLogger(__name__).info("Plotting variance vs time and saving to {0} ...".format(variance_save_path))
 
         for dataset_name, dataset_id in self.datasets.items():
             for system_name, system_id in self.systems.items():
                 logging.getLogger(__name__).info("    .... distributions for {0} on {1}".format(system_name,
                                                                                                 dataset_name))
                 times = []
-                x_variance = []
-                y_variance = []
-                z_variance = []
+                absolute_variance = {'x': [], 'y': [], 'z': []}
                 motion_times = []
-                x_motion_variance = []
-                y_motion_variance = []
-                z_motion_variance = []
-                x_motion_normalized = []
-                y_motion_normalized = []
-                z_motion_normalized = []
+                motion_errors = {'x': [], 'y': [], 'z': []}
+                motion_variance = {'x': [], 'y': [], 'z': []}
+                motion_variance_normalized = {'x': [], 'y': [], 'z': []}
+
+                aggregate_times = []
+                aggregate_motion_std = []
+                aggregate_motion_mean_error = []
 
                 trial_result_list = self.get_trial_results(system_id, dataset_id)
-                ground_truth_traj = None
+                ground_truth_motions = None
                 gt_scale = None
                 computed_trajectories = []
                 computed_motion_sequences = []
@@ -83,9 +252,10 @@ class BaseConsistencyExperiment(arvet.batch_analysis.simple_experiment.SimpleExp
                 for trial_result_id in trial_result_list:
                     trial_result = dh.load_object(db_client, db_client.trials_collection, trial_result_id)
                     if trial_result is not None and trial_result.success:
-                        if ground_truth_traj is None:
-                            ground_truth_traj = trial_result.get_ground_truth_camera_poses()
-                            gt_scale = th.find_trajectory_scale(ground_truth_traj)
+                        if ground_truth_motions is None:
+                            ground_truth_motions = trial_result.get_ground_truth_camera_poses()
+                            gt_scale = th.find_trajectory_scale(ground_truth_motions)
+                            ground_truth_motions = th.trajectory_to_motion_sequence(ground_truth_motions)
                         traj = trial_result.get_computed_camera_poses()
 
                         # Normalize monocular trajectories
@@ -97,11 +267,11 @@ class BaseConsistencyExperiment(arvet.batch_analysis.simple_experiment.SimpleExp
 
                         computed_trajectories.append(traj)
                         computed_motion_sequences.append(th.trajectory_to_motion_sequence(traj))
-                        timestamps.append({k: v for k, v in ass.associate(ground_truth_traj, traj,
+                        timestamps.append({k: v for k, v in ass.associate(ground_truth_motions, traj,
                                                                           max_difference=0.1, offset=0)})
 
                 # Now that we have all the trajectories, we can measure consistency
-                for time in sorted(ground_truth_traj.keys()):
+                for time in sorted(ground_truth_motions.keys()):
                     if sum(1 for idx in range(len(timestamps)) if time in timestamps[idx]) <= 1:
                         # Skip locations/results which appear in only one trajectory
                         continue
@@ -115,12 +285,9 @@ class BaseConsistencyExperiment(arvet.batch_analysis.simple_experiment.SimpleExp
                     if len(computed_locations) > 0:
                         mean_computed_location = np.mean(computed_locations, axis=0)
                         times += [time for _ in range(len(computed_locations))]
-                        x_variance += [computed_locations[0] - mean_computed_location[0]
-                                       for computed_locations in computed_locations]
-                        y_variance += [computed_locations[1] - mean_computed_location[1]
-                                       for computed_locations in computed_locations]
-                        z_variance += [computed_locations[2] - mean_computed_location[2]
-                                       for computed_locations in computed_locations]
+                        for idx, axis in enumerate(['x', 'y', 'z']):
+                            absolute_variance[axis] += [computed_locations[idx] - mean_computed_location[idx]
+                                                        for computed_locations in computed_locations]
 
                     # Find the mean estimated motion for this time
                     computed_motions = [
@@ -132,135 +299,98 @@ class BaseConsistencyExperiment(arvet.batch_analysis.simple_experiment.SimpleExp
                         mean_computed_motion = np.mean(computed_motions, axis=0)
                         std_computed_motion = np.std(computed_motions, axis=0)
                         motion_times += [time for _ in range(len(computed_motions))]
-                        x_motion_variance += [computed_motion[0] - mean_computed_motion[0]
-                                              for computed_motion in computed_motions]
-                        y_motion_variance += [computed_motion[1] - mean_computed_motion[1]
-                                              for computed_motion in computed_motions]
-                        z_motion_variance += [computed_motion[2] - mean_computed_motion[2]
-                                              for computed_motion in computed_motions]
-                        x_motion_normalized += [(computed_motion[0] - mean_computed_motion[0]) / std_computed_motion[0]
-                                                for computed_motion in computed_motions]
-                        y_motion_normalized += [(computed_motion[1] - mean_computed_motion[1]) / std_computed_motion[1]
-                                                for computed_motion in computed_motions]
-                        z_motion_normalized += [(computed_motion[2] - mean_computed_motion[2]) / std_computed_motion[2]
-                                                for computed_motion in computed_motions]
 
-                # Plot location variance vs time
+                        aggregate_times.append(time)
+                        aggregate_motion_std.append(std_computed_motion)
+                        aggregate_motion_mean_error.append(mean_computed_motion - ground_truth_motions[time].location)
+
+                        for idx, axis in enumerate(['x', 'y', 'z']):
+                            motion_variance[axis] += [computed_motion[idx] - mean_computed_motion[idx]
+                                                      for computed_motion in computed_motions]
+                            motion_variance_normalized[axis] += [
+                                (computed_motion[idx] - mean_computed_motion[idx]) / std_computed_motion[idx]
+                                for computed_motion in computed_motions
+                            ]
+                            motion_errors[axis] += [computed_motion[idx] - ground_truth_motions[time].location[idx]
+                                                    for computed_motion in computed_motions]
+
+                # Plot absolute location variance vs time as a plot and a heatmap
                 title = "{0} on {1} estimate variation".format(system_name, dataset_name)
                 figure = pyplot.figure(figsize=(30, 10), dpi=80)
                 figure.suptitle(title)
 
-                ax = figure.add_subplot(131)
-                ax.set_title('x')
-                ax.set_xlabel('time (s)')
-                ax.set_ylabel('x variance (m)')
-                ax.plot(times, x_variance, c='blue', alpha=0.5, marker='.', markersize=2, linestyle='None')
+                hist_title = "{0} on {1} estimate variation heatmap".format(system_name, dataset_name)
+                hist_figure = pyplot.figure(figsize=(30, 10), dpi=80)
+                hist_figure.suptitle(hist_title)
 
-                ax = figure.add_subplot(132)
-                ax.set_title('y')
-                ax.set_xlabel('time (s)')
-                ax.set_ylabel('y variance (m)')
-                ax.plot(times, y_variance, c='blue', alpha=0.5, marker='.', markersize=2, linestyle='None')
+                for idx, axis in enumerate(['x', 'y', 'z']):
+                    ax = figure.add_subplot(131 + idx)
+                    ax.set_title(axis)
+                    ax.set_xlabel('time (s)')
+                    ax.set_ylabel('{0} variance (m)'.format(axis))
+                    ax.plot(times, absolute_variance[axis], c='blue', alpha=0.5, marker='.',
+                            markersize=2, linestyle='None')
 
-                ax = figure.add_subplot(133)
-                ax.set_title('z')
-                ax.set_xlabel('time (s)')
-                ax.set_ylabel('z variance (m)')
-                ax.plot(times, z_variance, c='blue', alpha=0.5, marker='.', markersize=2, linestyle='None')
-
-                pyplot.tight_layout()
-                pyplot.subplots_adjust(top=0.90, right=0.99)
-
-                figure.savefig(os.path.join(save_path, title + '.png'))
-                pyplot.close(figure)
-
-                # Plot location variance vs time as a heatmap
-                title = "{0} on {1} estimate variation heatmap".format(system_name, dataset_name)
-                figure = pyplot.figure(figsize=(30, 10), dpi=80)
-                figure.suptitle(title)
-
-                ax = figure.add_subplot(131)
-                ax.set_title('x')
-                ax.set_xlabel('time (s)')
-                ax.set_ylabel('x variance (m)')
-                heatmap, xedges, yedges = np.histogram2d(times, x_variance, bins=300)
-                ax.imshow(heatmap.T, extent=[xedges[0], xedges[-1], yedges[0], yedges[-1]], origin='lower',
-                          aspect='auto', cmap=pyplot.get_cmap('inferno_r'))
-
-                ax = figure.add_subplot(132)
-                ax.set_title('y')
-                ax.set_xlabel('time (s)')
-                ax.set_ylabel('y variance (m)')
-                heatmap, xedges, yedges = np.histogram2d(times, y_variance, bins=300)
-                ax.imshow(heatmap.T, extent=[xedges[0], xedges[-1], yedges[0], yedges[-1]], origin='lower',
-                          aspect='auto', cmap=pyplot.get_cmap('inferno_r'))
-
-                ax = figure.add_subplot(133)
-                ax.set_title('z')
-                ax.set_xlabel('time (s)')
-                ax.set_ylabel('z variance (m)')
-                heatmap, xedges, yedges = np.histogram2d(times, z_variance, bins=300)
-                ax.imshow(heatmap.T, extent=[xedges[0], xedges[-1], yedges[0], yedges[-1]], origin='lower',
-                          aspect='auto', cmap=pyplot.get_cmap('inferno_r'))
+                    ax = hist_figure.add_subplot(131 + idx)
+                    ax.set_title(axis)
+                    ax.set_xlabel('time (s)')
+                    ax.set_ylabel('{0} variance (m)'.format(axis))
+                    heatmap, xedges, yedges = np.histogram2d(times, absolute_variance[axis], bins=300)
+                    ax.imshow(heatmap.T, extent=[xedges[0], xedges[-1], yedges[0], yedges[-1]], origin='lower',
+                              aspect='auto', cmap=pyplot.get_cmap('inferno_r'))
 
                 pyplot.tight_layout()
                 pyplot.subplots_adjust(top=0.90, right=0.99)
 
-                figure.savefig(os.path.join(save_path, title + '.png'))
+                figure.savefig(os.path.join(variance_save_path, title + '.png'))
                 pyplot.close(figure)
+                hist_figure.savefig(os.path.join(variance_save_path, hist_title + '.png'))
+                pyplot.close(hist_figure)
 
-                # Plot computed motion variance vs time
+                # Plot computed motion variance vs time as a plot and heatmap
                 title = "{0} on {1} motion estimate variation".format(system_name, dataset_name)
                 figure = pyplot.figure(figsize=(30, 10), dpi=80)
                 figure.suptitle(title)
 
-                ax = figure.add_subplot(131)
-                ax.set_title('x')
-                ax.set_xlabel('time (s)')
-                ax.set_ylabel('x variance (m)')
-                ax.plot(motion_times, x_motion_variance, c='blue', alpha=0.5, marker='.', markersize=2,
-                        linestyle='None')
+                hist_title = "{0} on {1} motion estimate variation heatmap".format(system_name, dataset_name)
+                hist_figure = pyplot.figure(figsize=(30, 10), dpi=80)
+                hist_figure.suptitle(hist_title)
 
-                ax = figure.add_subplot(132)
-                ax.set_title('y')
-                ax.set_xlabel('time (s)')
-                ax.set_ylabel('y variance (m)')
-                ax.plot(motion_times, y_motion_variance, c='blue', alpha=0.5, marker='.', markersize=2,
-                        linestyle='None')
+                combined_title = "{0} on {1} combined motion estimate variation".format(system_name, dataset_name)
+                combined_figure = pyplot.figure(figsize=(30, 10), dpi=80)
+                combined_figure.suptitle(combined_title)
+                combined_ax = combined_figure.add_subplot(111)
+                combined_ax.set_xlabel('time (s)')
+                combined_ax.set_ylabel('variance (m)')
 
-                ax = figure.add_subplot(133)
-                ax.set_title('z')
-                ax.set_xlabel('time (s)')
-                ax.set_ylabel('z variance (m)')
-                ax.plot(motion_times, z_motion_variance, c='blue', alpha=0.5, marker='.', markersize=2,
-                        linestyle='None')
+                for idx, (axis, colour) in enumerate([('x', 'red'), ('y', 'green'), ('z', 'blue')]):
+                    ax = figure.add_subplot(131 + idx)
+                    ax.set_title(axis)
+                    ax.set_xlabel('time (s)')
+                    ax.set_ylabel('{0} variance (m)'.format(axis))
+                    ax.plot(motion_times, motion_variance[axis], c='blue', alpha=0.5, marker='.', markersize=2,
+                            linestyle='None')
+
+                    ax = hist_figure.add_subplot(131 + idx)
+                    ax.set_title(axis)
+                    ax.set_xlabel('time (s)')
+                    ax.set_ylabel('{0} variance (m)'.format(axis))
+                    heatmap, xedges, yedges = np.histogram2d(motion_times, motion_variance[axis], bins=300)
+                    ax.imshow(heatmap.T, extent=[xedges[0], xedges[-1], yedges[0], yedges[-1]], origin='lower',
+                              aspect='auto', cmap=pyplot.get_cmap('inferno_r'))
+
+                    combined_ax.plot(motion_times, motion_variance[axis], c=colour, alpha=0.5, marker='.',
+                                     markersize=2, linestyle='None')
 
                 pyplot.tight_layout()
                 pyplot.subplots_adjust(top=0.90, right=0.99)
 
-                figure.savefig(os.path.join(save_path, title + '.png'))
+                figure.savefig(os.path.join(variance_save_path, title + '.png'))
                 pyplot.close(figure)
-
-                # Plot computed motion variance in each axis
-                title = "{0} on {1} combined motion estimate variation".format(system_name, dataset_name)
-                figure = pyplot.figure(figsize=(30, 10), dpi=80)
-                figure.suptitle(title)
-
-                ax = figure.add_subplot(111)
-                ax.set_xlabel('time (s)')
-                ax.set_ylabel('variance (m)')
-                ax.plot(motion_times, x_motion_variance, c='red', alpha=0.5, marker='.', markersize=2,
-                        linestyle='None')
-                ax.plot(motion_times, y_motion_variance, c='green', alpha=0.5, marker='.', markersize=2,
-                        linestyle='None')
-                ax.plot(motion_times, z_motion_variance, c='blue', alpha=0.5, marker='.', markersize=2,
-                        linestyle='None')
-
-                pyplot.tight_layout()
-                pyplot.subplots_adjust(top=0.95, right=0.99)
-
-                figure.savefig(os.path.join(save_path, title + '.png'))
-                pyplot.close(figure)
+                hist_figure.savefig(os.path.join(variance_save_path, hist_title + '.png'))
+                pyplot.close(hist_figure)
+                combined_figure.savefig(os.path.join(variance_save_path, combined_title + '.png'))
+                pyplot.close(combined_figure)
 
                 # Plot histogram of normalized variance
                 title = "{0} on {1} motion variance histogram".format(system_name, dataset_name)
@@ -270,53 +400,70 @@ class BaseConsistencyExperiment(arvet.batch_analysis.simple_experiment.SimpleExp
                 ax = figure.add_subplot(111)
                 ax.set_xlabel('time (s)')
                 ax.set_ylabel('variance (m)')
-                if np.min(x_motion_normalized) < np.max(x_motion_normalized):
-                    ax.hist(x_motion_normalized, bins=100, color='red', alpha=0.3, label='x axis')
-                if np.min(y_motion_normalized) < np.max(y_motion_normalized):
-                    ax.hist(y_motion_normalized, bins=100, color='green', alpha=0.3, label='y axis')
-                if np.min(z_motion_normalized) < np.max(z_motion_normalized):
-                    ax.hist(z_motion_normalized, bins=100, color='blue', alpha=0.3, label='z axis')
+                if np.min(motion_variance_normalized['x']) < np.max(motion_variance_normalized['x']):
+                    ax.hist(motion_variance_normalized['x'], bins=100, color='red', alpha=0.3, label='x axis')
+                if np.min(motion_variance_normalized['y']) < np.max(motion_variance_normalized['y']):
+                    ax.hist(motion_variance_normalized['y'], bins=100, color='green', alpha=0.3, label='y axis')
+                if np.min(motion_variance_normalized['z']) < np.max(motion_variance_normalized['z']):
+                    ax.hist(motion_variance_normalized['z'], bins=100, color='blue', alpha=0.3, label='z axis')
 
                 pyplot.tight_layout()
                 pyplot.subplots_adjust(top=0.95, right=0.99)
 
-                figure.savefig(os.path.join(save_path, title + '.png'))
+                figure.savefig(os.path.join(variance_save_path, title + '.png'))
                 pyplot.close(figure)
 
-                # Plot computed motion variance vs time as a heatmap
-                title = "{0} on {1} motion estimate variation heatmap".format(system_name, dataset_name)
+                # Plot aggregate standard deviation over time
+                title = "{0} on {1} standard deivation vs time".format(system_name, dataset_name)
                 figure = pyplot.figure(figsize=(30, 10), dpi=80)
                 figure.suptitle(title)
 
-                ax = figure.add_subplot(131)
-                ax.set_title('x')
+                ax = figure.add_subplot(111)
                 ax.set_xlabel('time (s)')
-                ax.set_ylabel('x variance (m)')
-                heatmap, xedges, yedges = np.histogram2d(motion_times, x_motion_variance, bins=300)
-                ax.imshow(heatmap.T, extent=[xedges[0], xedges[-1], yedges[0], yedges[-1]], origin='lower',
-                          aspect='auto', cmap=pyplot.get_cmap('inferno_r'))
+                ax.set_ylabel('standard deviation (m)')
+                aggregate_motion_std = np.array(aggregate_motion_std)
+                for idx, (axis, colour) in enumerate([('x', 'red'), ('y', 'green'), ('z', 'blue')]):
+                    ax.plot(aggregate_times, aggregate_motion_std[:, idx], c=colour, alpha=0.5, marker='None',
+                            markersize=2, linestyle='-', label='{0} axis'.format(axis))
+                ax.legend()
+                pyplot.tight_layout()
+                pyplot.subplots_adjust(top=0.95, right=0.99)
 
-                ax = figure.add_subplot(132)
-                ax.set_title('y')
-                ax.set_xlabel('time (s)')
-                ax.set_ylabel('y variance (m)')
-                heatmap, xedges, yedges = np.histogram2d(motion_times, y_motion_variance, bins=300)
-                ax.imshow(heatmap.T, extent=[xedges[0], xedges[-1], yedges[0], yedges[-1]], origin='lower',
-                          aspect='auto', cmap=pyplot.get_cmap('inferno_r'))
+                figure.savefig(os.path.join(variance_save_path, title + '.png'))
+                pyplot.close(figure)
 
-                ax = figure.add_subplot(133)
-                ax.set_title('z')
-                ax.set_xlabel('time (s)')
-                ax.set_ylabel('z variance (m)')
-                heatmap, xedges, yedges = np.histogram2d(motion_times, z_motion_variance, bins=300)
-                ax.imshow(heatmap.T, extent=[xedges[0], xedges[-1], yedges[0], yedges[-1]], origin='lower',
-                          aspect='auto', cmap=pyplot.get_cmap('inferno_r'))
+                # Plot the motion error vs time
+                title = "{0} on {1} motion error vs time".format(system_name, dataset_name)
+                figure = pyplot.figure(figsize=(30, 10), dpi=80)
+                figure.suptitle(title)
+                motion_error_ax = figure.add_subplot(111)
+                motion_error_ax.set_xlabel('time (s)')
+                motion_error_ax.set_ylabel('error (m)')
+
+                hist_title = "{0} on {1} motion error vs time heatmap".format(system_name, dataset_name)
+                hist_figure = pyplot.figure(figsize=(30, 10), dpi=80)
+                hist_figure.suptitle(hist_title)
+
+                for idx, (axis, colour) in enumerate([('x', 'red'), ('y', 'green'), ('z', 'blue')]):
+                    motion_error_ax.plot(motion_times, motion_errors[axis], c=colour, alpha=0.5, marker='.',
+                                         markersize=2, linestyle='None')
+
+                    ax = hist_figure.add_subplot(131 + idx)
+                    ax.set_title(axis)
+                    ax.set_xlabel('time (s)')
+                    ax.set_ylabel('{0} variance (m)'.format(axis))
+                    heatmap, xedges, yedges = np.histogram2d(motion_times, motion_errors[axis], bins=300)
+                    ax.imshow(heatmap.T, extent=[xedges[0], xedges[-1], yedges[0], yedges[-1]], origin='lower',
+                              aspect='auto', cmap=pyplot.get_cmap('inferno_r'))
+                motion_error_ax.legend()
 
                 pyplot.tight_layout()
                 pyplot.subplots_adjust(top=0.90, right=0.99)
 
-                figure.savefig(os.path.join(save_path, title + '.png'))
+                figure.savefig(os.path.join(error_save_path, title + '.png'))
                 pyplot.close(figure)
+                hist_figure.savefig(os.path.join(error_save_path, hist_title + '.png'))
+                pyplot.close(hist_figure)
 
         # Show all the graphs remaining
         pyplot.show()
@@ -636,9 +783,11 @@ class BaseConsistencyExperiment(arvet.batch_analysis.simple_experiment.SimpleExp
                     mean_time = np.mean([timestamps[idx][time] for idx in range(len(computed_trajectories))
                                          if time in timestamps[idx]])
 
-                    mean_orientation = quat_mean([computed_trajectories[idx][timestamps[idx][time]].rotation_quat(True)
-                                                  for idx in range(len(computed_trajectories))
-                                                  if time in timestamps[idx]])
+                    mean_orientation = data_helpers.quat_mean([
+                        computed_trajectories[idx][timestamps[idx][time]].rotation_quat(True)
+                        for idx in range(len(computed_trajectories))
+                        if time in timestamps[idx]
+                    ])
 
                     # Find the distance to the prev frame
                     current_location = ground_truth_traj[time].location
@@ -657,8 +806,10 @@ class BaseConsistencyExperiment(arvet.batch_analysis.simple_experiment.SimpleExp
                             variance.append(np.dot(mean_estimate - computed_location,
                                                    mean_estimate - computed_location))
                             rot_variance.append(
-                                quat_diff(mean_orientation,
-                                          computed_trajectories[idx][timestamps[idx][time]].rotation_quat(True))**2
+                                data_helpers.quat_diff(
+                                    mean_orientation,
+                                    computed_trajectories[idx][timestamps[idx][time]].rotation_quat(True)
+                                )**2
                             )
                             time_variance.append((mean_time - timestamps[idx][time]) *
                                                  (mean_time - timestamps[idx][time]))
@@ -735,35 +886,3 @@ class BaseConsistencyExperiment(arvet.batch_analysis.simple_experiment.SimpleExp
                     label = "{0} on {1} repeat {2}".format(system_name, dataset_name, idx)
                     trial_results[label] = trial_result_id
             data_helpers.export_trajectory_as_json(trial_results, "Consistency " + dataset_name, db_client)
-
-
-def quat_mean(quaternions):
-    """
-    Find the mean of a bunch of quaternions
-    :param quaternions:
-    :return:
-    """
-    if len(quaternions) <= 0:
-        return np.nan
-    q_mat = np.asarray(quaternions)
-    product = np.dot(q_mat.T, q_mat)
-    evals, evecs = np.linalg.eig(product)
-    best = -1
-    result = None
-    for idx in range(len(evals)):
-        if evals[idx] > best:
-            best = evals[idx]
-            result = evecs[idx]
-    return result
-
-
-def quat_diff(q1, q2):
-    """
-    Find the angle between two quaternions
-    Basically, we compose them, and derive the angle from the composition
-    :param q1:
-    :param q2:
-    :return:
-    """
-    z0 = q1[0] * q2[0] - q1[1] * q2[1] - q1[2] * q2[2] - q1[3] * q2[3]
-    return 2 * np.arccos(min(1, max(-1, z0)))
