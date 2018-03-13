@@ -262,8 +262,130 @@ class GeneratedDataExperiment(arvet.batch_analysis.experiment.Experiment):
         :param db_client:
         :return:
         """
-        # self._plot_big_hammer_covariance(db_client)
-        self._plot_big_hammer_aggregate_stats(db_client)
+        self._plot_big_hammer_covariance(db_client)
+        self._plot_aggregate_stats_per_group(db_client)
+        self._plot_error_over_time(db_client)
+        self._plot_variance_over_time(db_client)
+
+    def _plot_aggregate_stats_per_group(self, db_client: arvet.database.client.DatabaseClient):
+        import matplotlib.pyplot as pyplot
+        import matplotlib.patches as mpatches
+
+        save_path = os.path.join('figures', type(self).__name__, 'real vs virtual aggregate')
+        os.makedirs(save_path, exist_ok=True)
+
+        colour_map = {'max quality': 'red'}
+        colours = ['green', 'darkgreen', 'seagreen', 'lime', 'limegreen', 'olive']
+        colour_idx = 0
+
+        # Collect the trial results for each image source in this group
+        for system_name, system_id in self.systems.items():
+            for trajectory_group in self.trajectory_groups.values():
+                real_errors = []
+                virtual_errors = {}
+                virtual_worlds = 0
+
+                gt_motions = None
+                gt_scale = None
+                # Real world trajectory
+                trial_result_list = self.get_trial_results(system_id, trajectory_group.reference_dataset)
+                for trial_idx, trial_result_id in enumerate(trial_result_list):
+                    trial_result = dh.load_object(db_client, db_client.trials_collection, trial_result_id)
+                    if trial_result is not None:
+                        if gt_motions is None:
+                            traj = trial_result.get_ground_truth_camera_poses()
+                            gt_scale = th.find_trajectory_scale(traj)
+                            gt_motions = th.trajectory_to_motion_sequence(traj)
+                        traj = trial_result.get_computed_camera_poses()
+                        if 'mono' in system_name.lower():   # Normalize monocular trajectories
+                            traj = th.rescale_trajectory(traj, gt_scale)
+
+                        logging.getLogger(__name__).info(
+                            "    ... adding group \"{0}\" real world trial {1} ({2} total points)".format(
+                                trajectory_group.name, trial_idx, len(real_errors)))
+                        real_errors += get_errors_for_motions(th.trajectory_to_motion_sequence(traj), gt_motions)
+
+                # max quality synthetic data trajectories
+                for world_name, quality_map in trajectory_group.generated_datasets.items():
+                    if len(quality_map) > 0:
+                        virtual_worlds += 1
+                    for quality_name, dataset_id in quality_map.items():
+                        if quality_name not in colour_map:
+                            colour_map[quality_name] = colours[colour_idx % len(colours)]
+                            colour_idx += 1
+                        if quality_name not in virtual_errors:
+                            virtual_errors[quality_name] = []
+
+                        trial_result_list = self.get_trial_results(system_id, dataset_id)
+                        for trial_idx, trial_result_id in enumerate(trial_result_list):
+                            trial_result = dh.load_object(db_client, db_client.trials_collection, trial_result_id)
+                            if trial_result is not None:
+                                if gt_motions is None:
+                                    gt_motions = th.trajectory_to_motion_sequence(
+                                        trial_result.get_ground_truth_camera_poses())
+                                traj = trial_result.get_computed_camera_poses()
+                                if 'mono' in system_name.lower():  # Normalize monocular trajectories
+                                    traj = th.rescale_trajectory(traj, gt_scale)
+
+                                logging.getLogger(__name__).info(
+                                    "    ... adding group \"{0}\" simulated trial from world {1} "
+                                    "repeat {2} ({3} total points)".format(
+                                        trajectory_group.name, world_name, trial_idx, len(virtual_errors[quality_name])
+                                    )
+                                )
+                                virtual_errors[quality_name] += get_errors_for_motions(
+                                    th.trajectory_to_motion_sequence(traj), gt_motions)
+
+                if len(real_errors) > 0 and len(virtual_errors) > 0 and len(virtual_errors['max quality']) > 0:
+                    real_errors = np.array(real_errors)
+                    virtual_error_data = np.array(virtual_errors['max quality'])
+
+                    title = "Aggregate real vs virtual errors by trajectory for {0} on {1} ({2} virtual worlds)".format(
+                        system_name, trajectory_group.name, virtual_worlds)
+                    logging.getLogger(__name__).info("    creating plot \"{0}\"".format(title))
+                    figure, axes = pyplot.subplots(1, real_errors.shape[1], squeeze=False,
+                                                   figsize=(10 * real_errors.shape[1], 10), dpi=80)
+                    figure.suptitle(title)
+                    for error_idx, error_name in enumerate(['x axis', 'y axis', 'z axis', 'motion error distance',
+                                                            'log error distance', 'motion error direction', 'angle']):
+                        real_range = data_helpers.compute_window(real_errors[:, error_idx], std_deviations=3)
+                        virtual_range = data_helpers.compute_window(virtual_error_data[:, error_idx], std_deviations=3)
+
+                        # Merge the ranges for a unified graph
+                        data_range = (min(real_range[0], virtual_range[0]), max(real_range[1], virtual_range[1]))
+                        real_outliers = data_helpers.compute_outliers(real_errors[:, error_idx], data_range)
+                        virtual_outliers = data_helpers.compute_outliers(virtual_error_data[:, error_idx], data_range)
+
+                        ax = axes[0][error_idx]
+                        ax.set_title(error_name)
+                        ax.set_xlabel('error ({0} real outliers, {1} virtual outliers)'.format(real_outliers,
+                                                                                               virtual_outliers))
+                        ax.set_ylabel('density')
+                        logging.getLogger(__name__).info('    ... plotting {0}'.format(error_name))
+                        ax.hist(real_errors[:, error_idx], normed=1, bins=300, color='blue',
+                                alpha=0.5, range=data_range)
+                        ax.hist(virtual_error_data[:, error_idx], normed=1, bins=300, color='red',
+                                alpha=0.5, range=data_range)
+
+                        # Plot the data for the other qualities
+                        for quality_name, low_quality_data in virtual_errors.items():
+                            if not quality_name == 'max quality' and len(low_quality_data) > 0:
+                                low_quality_data = np.array(low_quality_data)
+                                ax.hist(low_quality_data[:, error_idx], normed=1, bins=300,
+                                        color=colour_map[quality_name], alpha=0.25, range=data_range)
+
+                    pyplot.figlegend(handles=[
+                        mpatches.Patch(color='blue', alpha=0.5, label='Real Data')
+                    ] + [
+                        mpatches.Patch(color=colour, alpha=0.5, label='Virtual Data ({0})'.format(quality_name))
+                        for quality_name, colour in colour_map.items()
+                    ], loc='upper right')
+                    pyplot.tight_layout()
+                    pyplot.subplots_adjust(top=0.90, right=0.99)
+
+                    figure.savefig(os.path.join(save_path, title + '.png'))
+                    pyplot.close(figure)
+        pyplot.show()
 
     def _plot_big_hammer_aggregate_stats(self, db_client: arvet.database.client.DatabaseClient):
         import matplotlib.pyplot as pyplot
@@ -336,17 +458,23 @@ class GeneratedDataExperiment(arvet.batch_analysis.experiment.Experiment):
                 figure = pyplot.figure(figsize=(14, 10), dpi=80)
                 figure.suptitle(title)
 
-                for idx, error_name in enumerate(['x axis', 'y axis', 'z axis', 'angle']):
-                    real_range, real_outliers = data_helpers.compute_window(real_errors[:, idx], std_deviations=3)
-                    virtual_range, virtual_outliers = data_helpers.compute_window(virtual_errors[:, idx],
-                                                                                  std_deviations=3)
+                for idx, error_name in enumerate(['x axis', 'y axis', 'z axis', 'motion error distance',
+                                                  'log error distance', 'motion error direction', 'angle']):
+                    real_range = data_helpers.compute_window(real_errors[:, idx], std_deviations=3)
+                    virtual_range = data_helpers.compute_window(virtual_errors[:, idx], std_deviations=3)
+
+                    # Merge the ranges for a unified graph
+                    data_range = (min(real_range[0], virtual_range[0]), max(real_range[1], virtual_range[1]))
+                    real_outliers = data_helpers.compute_outliers(real_errors[:, idx], data_range)
+                    virtual_outliers = data_helpers.compute_outliers(virtual_errors[:, idx], data_range)
+
                     ax = figure.add_subplot(221 + idx)
                     ax.set_title(error_name)
                     ax.set_xlabel('error ({0} real outliers, {1} virtual outliers)'.format(real_outliers,
                                                                                            virtual_outliers))
                     ax.set_ylabel('density')
-                    ax.hist(real_errors[:, idx], normed=1, bins=1000, color='red', alpha=0.5, range=real_range)
-                    ax.hist(virtual_errors[:, idx], normed=1, bins=1000, color='blue', alpha=0.5, range=virtual_range)
+                    ax.hist(real_errors[:, idx], normed=1, bins=1000, color='red', alpha=0.5, range=data_range)
+                    ax.hist(virtual_errors[:, idx], normed=1, bins=1000, color='blue', alpha=0.5, range=data_range)
 
                 pyplot.figlegend(handles=[
                     mpatches.Patch(color='red', alpha=0.5, label='Real Data'),
@@ -1196,10 +1324,21 @@ def get_errors_for_motions(motions, gt_motions):
     observations = []
     for gt_time, comp_time in ass.associate(gt_motions, motions, offset=0, max_difference=0.1):
         trans_err = motions[comp_time].location - gt_motions[gt_time].location
+        error_length = np.linalg.norm(trans_err)
+        # cos(angle) = dot(err, motion), so we take the arccos of the dot product
+        error_direction = np.arccos(
+            min(1.0, max(-1.0, np.dot(
+                trans_err / error_length,
+                gt_motions[gt_time].location / np.linalg.norm(gt_motions[gt_time].location)))
+                )
+        )
         observations.append([
             trans_err[0],
             trans_err[1],
             trans_err[2],
+            error_length,
+            np.log(error_length),
+            error_direction,
             data_helpers.quat_diff(motions[comp_time].rotation_quat(True), gt_motions[gt_time].rotation_quat(True))
         ])
     return observations

@@ -39,8 +39,8 @@ class BaseConsistencyExperiment(arvet.batch_analysis.simple_experiment.SimpleExp
         """
         # Visualize the different trajectories in each group
         self._plot_error_vs_motion(db_client)
-        # self._compute_error_vs_motion_correlation(db_client)
-        # self._plot_variance_vs_time(db_client)
+        self._compute_error_vs_motion_correlation(db_client)
+        self._plot_variance_vs_time(db_client)
         # self._plot_estimate_variance(db_client)
         # self._plot_error_vs_motion(db_client)
         # self._plot_variations(db_client)
@@ -170,8 +170,10 @@ class BaseConsistencyExperiment(arvet.batch_analysis.simple_experiment.SimpleExp
                         ('rotation noise', 'rotation noise (rad)', np.array(rotation_noise)),
                         ('mean rotation error', 'mean rotation error (rad)', np.array(mean_rotation_errors)),
                     ]:
-                        x_limits, x_outliers = data_helpers.compute_window(x_data, std_deviations=4)
-                        y_limits, y_outliers = data_helpers.compute_window(y_data, std_deviations=4)
+                        x_limits = data_helpers.compute_window(x_data, std_deviations=4)
+                        y_limits = data_helpers.compute_window(y_data, std_deviations=4)
+                        x_outliers = data_helpers.compute_outliers(x_data, x_limits)
+                        y_outliers = data_helpers.compute_outliers(y_data, y_limits)
 
                         ax = axes[plot_idx][0]
                         ax.set_title("{0} vs {1}".format(y_title_name, x_title_name))
@@ -624,7 +626,7 @@ class BaseConsistencyExperiment(arvet.batch_analysis.simple_experiment.SimpleExp
         # noinspection PyUnresolvedReferences
         from mpl_toolkits.mplot3d import Axes3D
 
-        save_path = os.path.join('figures', type(self).__name__, 'orbslam variance heatmaps')
+        save_path = os.path.join('figures', type(self).__name__, 'variance heatmaps')
         os.makedirs(save_path, exist_ok=True)
 
         logging.getLogger(__name__).info("Plotting error vs motion and saving to {0} ...".format(save_path))
@@ -757,7 +759,7 @@ class BaseConsistencyExperiment(arvet.batch_analysis.simple_experiment.SimpleExp
         # noinspection PyUnresolvedReferences
         from mpl_toolkits.mplot3d import Axes3D
 
-        save_path = os.path.join('figures', type(self).__name__, 'orbslam error vs motion heatmaps')
+        save_path = os.path.join('figures', type(self).__name__, 'error vs motion heatmaps')
         os.makedirs(save_path, exist_ok=True)
 
         logging.getLogger(__name__).info("Plotting error vs motion and saving to {0} ...".format(save_path))

@@ -185,7 +185,7 @@ def location_to_json(pose: tf.Transform) -> typing.List[float]:
     ]
 
 
-def compute_window(data: np.ndarray, std_deviations: float = 3.0) -> typing.Tuple[typing.Tuple[float, float], int]:
+def compute_window(data: np.ndarray, std_deviations: float = 3.0) -> typing.Tuple[float, float]:
     """
 
     :param data:
@@ -199,8 +199,17 @@ def compute_window(data: np.ndarray, std_deviations: float = 3.0) -> typing.Tupl
 
     range_min = np.max((mean - outlier_threshold, np.min(data)))
     range_max = np.min((mean + outlier_threshold, np.max(data)))
-    return (range_min, range_max), np.count_nonzero(
-        np.multiply(deviance_from_mean, deviance_from_mean) > outlier_threshold * outlier_threshold)
+    return range_min, range_max
+
+
+def compute_outliers(data: np.ndarray, data_range: typing.Tuple[float, float]) -> int:
+    """
+    Compute the number of outliers in a set of data if it is reduced to the given range
+    :param data: An array of data values (floats)
+    :param data_range: The min and max values for a window on this data
+    :return:
+    """
+    return np.count_nonzero((data >= data_range[0]) & (data < data_range[1]))
 
 
 def quat_angle(quat):
@@ -278,5 +287,16 @@ def quat_mean(quaternions):
                 best = evals[idx]
                 result = evecs[idx]
         if np.any(np.iscomplex(result)):
-            print("Error highest eigenvector is complex")
+            # Mean is complex, which means the quaternions are all too close together (I think?)
+            # Instead, return the Mode, the most common quaternion
+            counts = [
+                sum(1 for q2 in quaternions if np.array_equal(q1, q2))
+                for q1 in quaternions
+            ]
+            best = 0
+            for idx in range(len(counts)):
+                if counts[idx] > best:
+                    best = counts[idx]
+                    result = quaternions[idx]
+            print("Passing off mode as mean with {0} similar vectors".format(best))
         return result
