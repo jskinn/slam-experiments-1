@@ -556,7 +556,9 @@ class GeneratedDataExperiment(arvet.batch_analysis.experiment.Experiment):
                                     )
                                     observations += get_observations_for_motions(
                                         motions, gt_motions, trajectory_ids[trajectory_group.name], False)
-
+                if len(observations) <= 0:
+                    # No observations or results for this system, go on to the next. Don't save that fact.
+                    continue
                 observations = np.array(observations)
                 with open(observations_file, 'wb') as cache_file:
                     pickle.dump(observations, cache_file, protocol=pickle.HIGHEST_PROTOCOL)
@@ -604,7 +606,7 @@ class GeneratedDataExperiment(arvet.batch_analysis.experiment.Experiment):
     def _plot_error_over_time(self, db_client: arvet.database.client.DatabaseClient):
         import matplotlib.pyplot as pyplot
 
-        colours = ['red', 'green', 'blue', 'cyan', 'gold', 'magenta', 'brown', 'purple', 'orange',
+        colours = ['blue', 'orange', 'red', 'green', 'cyan', 'gold', 'magenta', 'brown', 'purple',
                    'navy', 'darkkhaki', 'darkgreen', 'crimson']
         colour_idx = 0
         colour_map = {}
@@ -712,7 +714,7 @@ class GeneratedDataExperiment(arvet.batch_analysis.experiment.Experiment):
     def _plot_variance_over_time(self, db_client: arvet.database.client.DatabaseClient):
         import matplotlib.pyplot as pyplot
 
-        colours = ['red', 'green', 'blue', 'cyan', 'gold', 'magenta', 'brown', 'purple', 'orange',
+        colours = ['blue', 'orange', 'red', 'green', 'cyan', 'gold', 'magenta', 'brown', 'purple',
                    'navy', 'darkkhaki', 'darkgreen', 'crimson']
         colour_idx = 0
         colour_map = {}
@@ -819,7 +821,7 @@ class GeneratedDataExperiment(arvet.batch_analysis.experiment.Experiment):
     def _plot_error_and_trajectories(self, db_client: arvet.database.client.DatabaseClient):
         import matplotlib.pyplot as pyplot
 
-        colours = ['red', 'green', 'cyan', 'gold', 'magenta', 'brown', 'purple', 'orange',
+        colours = ['orange', 'cyan', 'gold', 'magenta', 'green', 'brown', 'purple', 'red',
                    'navy', 'darkkhaki', 'darkgreen', 'crimson']
 
         # Group and print the trajectories for graphing

@@ -298,5 +298,5 @@ def quat_mean(quaternions):
                 if counts[idx] > best:
                     best = counts[idx]
                     result = quaternions[idx]
-            print("Passing off mode as mean with {0} similar vectors".format(best))
+            print("Passing off mode as mean with {0} of {1} identical vectors".format(best, len(quaternions)))
         return result
