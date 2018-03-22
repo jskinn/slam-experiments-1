@@ -26,7 +26,7 @@ class SimpleMotionExperiment(arvet.batch_analysis.experiment.Experiment):
                  simulators=None,
                  trajectory_groups=None,
                  benchmark_rpe=None, benchmark_ate=None, benchmark_trajectory_drift=None, benchmark_tracking=None,
-                 trial_map=None, result_map=None, enabled=True, id_=None):
+                 trial_map=None, enabled=True, id_=None):
         """
         Constructor. We need parameters to load the different stored parts of this experiment
         :param libviso_system:
@@ -37,7 +37,7 @@ class SimpleMotionExperiment(arvet.batch_analysis.experiment.Experiment):
         :param benchmark_trajectory_drift:
         :param id_:
         """
-        super().__init__(id_=id_, trial_map=trial_map, result_map=result_map, enabled=enabled)
+        super().__init__(id_=id_, trial_map=trial_map, enabled=enabled)
         # Systems
         self._libviso_system = libviso_system
         self._orbslam_systems = orbslam_systems if orbslam_systems is not None else {}

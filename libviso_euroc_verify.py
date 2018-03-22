@@ -12,7 +12,7 @@ class LibVisOEuRoCVerify(base_verify.VerificationExperiment):
     def __init__(self, systems=None,
                  datasets=None,
                  benchmarks=None,
-                 trial_map=None, result_map=None, enabled=True, id_=None):
+                 trial_map=None, enabled=True, id_=None):
         """
         Constructor. We need parameters to load the different stored parts of this experiment
         :param systems:
@@ -24,7 +24,7 @@ class LibVisOEuRoCVerify(base_verify.VerificationExperiment):
         :param id_:
         """
         super().__init__(systems=systems, datasets=datasets, benchmarks=benchmarks, repeats=1,
-                         id_=id_, trial_map=trial_map, result_map=result_map, enabled=enabled)
+                         id_=id_, trial_map=trial_map, enabled=enabled)
 
     def do_imports(self, task_manager: arvet.batch_analysis.task_manager.TaskManager,
                    path_manager: arvet.config.path_manager.PathManager,

@@ -33,7 +33,7 @@ class GeneratedDataExperiment(arvet.batch_analysis.experiment.Experiment):
                  simulators=None,
                  trajectory_groups=None,
                  benchmarks=None, repeats=1,
-                 trial_map=None, result_map=None, enabled=True, id_=None):
+                 trial_map=None, enabled=True, id_=None):
         """
         Constructor. We need parameters to load the different stored parts of this experiment
         :param systems:
@@ -41,11 +41,10 @@ class GeneratedDataExperiment(arvet.batch_analysis.experiment.Experiment):
         :param trajectory_groups:
         :param benchmarks:
         :param trial_map:
-        :param result_map:
         :param enabled:
         :param id_:
         """
-        super().__init__(id_=id_, trial_map=trial_map, result_map=result_map, enabled=enabled)
+        super().__init__(id_=id_, trial_map=trial_map, enabled=enabled)
         # Systems
         self._systems = systems if systems is not None else {}
 
@@ -90,7 +89,12 @@ class GeneratedDataExperiment(arvet.batch_analysis.experiment.Experiment):
         # Add a RPE benchmark for all experiments
         self.import_benchmark(
             name='Relative Pose Error',
-            benchmark=arvet_slam.benchmarks.rpe.relative_pose_error.BenchmarkRPE(max_pairs=0),
+            benchmark=arvet_slam.benchmarks.rpe.relative_pose_error.BenchmarkRPE(
+                max_pairs=0,
+                fixed_delta=True,
+                delta=1,
+                delta_unit='f'
+            ),
             db_client=db_client
         )
 
@@ -473,8 +477,8 @@ class GeneratedDataExperiment(arvet.batch_analysis.experiment.Experiment):
                     ax.set_xlabel('error ({0} real outliers, {1} virtual outliers)'.format(real_outliers,
                                                                                            virtual_outliers))
                     ax.set_ylabel('density')
-                    ax.hist(real_errors[:, idx], normed=1, bins=1000, color='red', alpha=0.5, range=data_range)
-                    ax.hist(virtual_errors[:, idx], normed=1, bins=1000, color='blue', alpha=0.5, range=data_range)
+                    ax.hist(real_errors[:, idx], normed=True, bins=1000, color='red', alpha=0.5, range=data_range)
+                    ax.hist(virtual_errors[:, idx], normed=True, bins=1000, color='blue', alpha=0.5, range=data_range)
 
                 pyplot.figlegend(handles=[
                     mpatches.Patch(color='red', alpha=0.5, label='Real Data'),
@@ -872,18 +876,19 @@ class GeneratedDataExperiment(arvet.batch_analysis.experiment.Experiment):
                                 computed_trajectories.append(th.zero_trajectory(
                                     trial_result.get_computed_camera_poses()))
 
-                                # Get and store the RPE benchmark result for this trial
-                                result_id = self.get_benchmark_result(trial_result_id,
-                                                                      self.benchmarks['Relative Pose Error'])
-                                if result_id is not None:
-                                    results_by_world[world_name][quality_name].append(
-                                        dh.load_object(db_client, db_client.results_collection, result_id)
-                                    )
-
                         plot_groups.append((world_name + ' ' + quality_name,
                                             computed_trajectories, {
                                                 'c': colours[(idx * len(quality_map) + qual_idx) % len(colours)]
                                             }))
+
+                        # Get and store the RPE benchmark result for this trial
+                        result_id = self.get_benchmark_result(system_id, dataset_id,
+                                                              self.benchmarks['Relative Pose Error'])
+                        if result_id is not None:
+                            results_by_world[world_name][quality_name].append(
+                                dh.load_object(db_client, db_client.results_collection, result_id)
+                            )
+
                 if ground_truth_trajectory is not None:
                     plot_groups.append(('Ground truth', [ground_truth_trajectory], {'c': 'black'}))
                 if show:
