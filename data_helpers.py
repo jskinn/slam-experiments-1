@@ -104,6 +104,7 @@ def create_axis_plot(title: str, trajectory_groups: typing.List[
                 legend_handles.append(mpatches.Patch(color=plot_kwargs['c'], alpha=0.5, label=label))
     pyplot.figlegend(handles=legend_handles, loc='upper right')
     figure.tight_layout()
+    pyplot.subplots_adjust(top=0.95, right=0.99)
     if save_path is not None:
         os.makedirs(save_path, exist_ok=True)
         # figure.savefig(os.path.join(save_path, title + '.svg'))
