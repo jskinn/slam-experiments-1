@@ -70,7 +70,7 @@ class KITTIGeneratedDataExperiment(base_generated_data_experiment.GeneratedDataE
         # Import KITTI datasets
         for sequence_num in range(11):
             self.import_dataset(
-                module_name='arvet.dataset.kitti.kitti_loader',
+                module_name='arvet_slam.dataset.kitti.kitti_loader',
                 name='KITTI trajectory {}'.format(sequence_num),
                 path=os.path.join('datasets', 'KITTI', 'dataset'),
                 additional_args={'sequence_number': sequence_num},
