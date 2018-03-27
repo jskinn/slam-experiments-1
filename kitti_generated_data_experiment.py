@@ -14,6 +14,7 @@ import arvet_slam.benchmarks.trajectory_drift.trajectory_drift as traj_drift
 import arvet_slam.benchmarks.tracking.tracking_benchmark as tracking_benchmark
 import base_generated_data_experiment
 import data_helpers
+import kitti_origins
 
 
 class KITTIGeneratedDataExperiment(base_generated_data_experiment.GeneratedDataExperiment):
@@ -73,7 +74,7 @@ class KITTIGeneratedDataExperiment(base_generated_data_experiment.GeneratedDataE
                 name='KITTI trajectory {}'.format(sequence_num),
                 path=os.path.join('datasets', 'KITTI', 'dataset'),
                 additional_args={'sequence_number': sequence_num},
-                mappings=get_mapping(sequence_num),
+                mappings=kitti_origins.get_mapping(sequence_num),
                 task_manager=task_manager,
                 path_manager=path_manager,
                 db_client=db_client,
@@ -177,29 +178,3 @@ class KITTIGeneratedDataExperiment(base_generated_data_experiment.GeneratedDataE
                         label = "{0} on {1} repeat {2}".format(system_name, dataset_name, idx)
                         trial_results[label] = trial_result_id
             data_helpers.export_trajectory_as_json(trial_results, "Generated Data " + trajectory_group.name, db_client)
-
-
-def get_mapping(sequence_num):
-    if sequence_num is 0:
-        return []
-    elif sequence_num is 1:
-        return []
-    elif sequence_num is 2:
-        return []
-    elif sequence_num is 3:
-        return []
-    elif sequence_num is 4:
-        return []
-    elif sequence_num is 5:
-        return []
-    elif sequence_num is 6:
-        return []
-    elif sequence_num is 7:
-        return []
-    elif sequence_num is 8:
-        return []
-    elif sequence_num is 9:
-        return []
-    elif sequence_num is 10:
-        return []
-    return []
