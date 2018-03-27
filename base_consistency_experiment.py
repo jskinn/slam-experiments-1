@@ -136,31 +136,31 @@ class BaseConsistencyExperiment(arvet.batch_analysis.simple_experiment.SimpleExp
                 ax.set_title('x noise distribution')
                 ax.set_xlabel('forward noise (m)')
                 ax.set_ylabel('Probability')
-                ax.hist(x_noise, density=True, bins=100, color='blue')
+                ax.hist(x_noise, density=True, bins=300, color='blue')
 
                 ax = axes[1]
                 ax.set_title('y noise distribution')
                 ax.set_xlabel('sideways noise (m)')
                 ax.set_ylabel('Probability')
-                ax.hist(y_noise, density=True, bins=100, color='blue')
+                ax.hist(y_noise, density=True, bins=300, color='blue')
 
                 ax = axes[2]
                 ax.set_title('z noise distribution')
                 ax.set_xlabel('upward noise (m)')
                 ax.set_ylabel('Probability')
-                ax.hist(z_noise, density=True, bins=100, color='blue')
+                ax.hist(z_noise, density=True, bins=300, color='blue')
 
                 ax = axes[3]
                 ax.set_title('distance noise distribution')
                 ax.set_xlabel('noise magnitude (m)')
                 ax.set_ylabel('Probability')
-                ax.hist(noise_magnitude, density=True, bins=100, color='blue')
+                ax.hist(noise_magnitude, density=True, bins=300, color='blue')
 
                 ax = axes[4]
                 ax.set_title('angle noise distribution')
                 ax.set_xlabel('noise angle (rad)')
                 ax.set_ylabel('Probability')
-                ax.hist(noise_angle, density=True, bins=100, color='blue')
+                ax.hist(noise_angle, density=True, bins=300, color='blue')
 
                 pyplot.tight_layout()
                 pyplot.subplots_adjust(top=0.90, right=0.99)
