@@ -407,7 +407,7 @@ class GeneratedPredictRealWorldExperiment(arvet.batch_analysis.experiment.Experi
             for world_name, quality_map in trajectory_group.generated_datasets.items():
                 for quality_name, dataset_id in quality_map.items():
                     if quality_name not in generated_datasets_by_quality:
-                        generated_datasets_by_quality = {}
+                        generated_datasets_by_quality[quality_name] = {}
                     if world_name not in generated_datasets_by_quality[quality_name]:
                         generated_datasets_by_quality[quality_name][world_name] = dataset_id
 
@@ -496,22 +496,39 @@ class GeneratedPredictRealWorldExperiment(arvet.batch_analysis.experiment.Experi
                        per_estimate_benchmark: bson.ObjectId,
                        output_folder: str,
                        db_client: arvet.database.client.DatabaseClient):
-
-        for system_name, system_id in systems:
+        if len(validation_datasets) <= 0:
+            logging.getLogger(__name__).info("Error, no validation datasets available")
+        if len(real_world_datasets) <= 0:
+            logging.getLogger(__name__).info("Error, no real world datasets available")
+        if len(generated_datasets_by_quality) <= 0:
+            logging.getLogger(__name__).info("Error, no generated datasets available")
+        for system_name, system_id in systems.items():
             logging.getLogger(__name__).info("Predicting errors for {0} ...".format(system_name))
 
             # Collect the data we want to predict
             validation = self.collect_errors_and_input(system_id, validation_datasets.values(), db_client)
+            if len(validation[0]) <= 0 or len(validation[1]) <= 0:
+                logging.getLogger(__name__).info("   No validation data available for {0}".format(system_name))
+                continue
 
             # Predict the error
+            train_x, train_y = self.collect_errors_and_input(system_id, real_world_datasets.values(), db_client)
+            if len(train_x) <= 0 or len(train_y) <= 0:
+                logging.getLogger(__name__).info("   No real world data available for {0}".format(system_name))
+                continue
             error = predict(
-                data=self.collect_errors_and_input(system_id, real_world_datasets.values(), db_client),
+                data=(train_x, train_y),
                 target_data=validation
             )
             logging.getLogger(__name__).info("    MSE from real-world data: {0}".format(error))
             for quality_name, world_map in generated_datasets_by_quality:
+                train_x, train_y = self.collect_errors_and_input(system_id, world_map.values(), db_client)
+                if len(train_x) <= 0 or len(train_y) <= 0:
+                    logging.getLogger(__name__).info("   No data available for {0} on {0}".format(
+                        system_name, quality_name))
+                    continue
                 error = predict(
-                    data=self.collect_errors_and_input(system_id, world_map.values(), db_client),
+                    data=(train_x, train_y),
                     target_data=validation
                 )
                 logging.getLogger(__name__).info("    MSE from {0} data: {1}".format(quality_name, error))
