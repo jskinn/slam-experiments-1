@@ -78,7 +78,7 @@ class EstimateErrorsBenchmark(arvet.core.benchmark.Benchmark):
                 gt_motion = ground_truth_motions[match[0]]
 
                 # Get estimate errors
-                motion_errors = (np.nan for _ in range(12))
+                motion_errors = tuple(np.nan for _ in range(12))
                 if match[1] in computed_motions:
                     motion_errors = get_error_from_motion(
                         motion=computed_motions[match[1]],
@@ -207,10 +207,8 @@ class EstimateErrorsResult(arvet.core.benchmark.BenchmarkResult):
 
     def serialize(self):
         output = super().serialize()
-        output['timestamps'] = self.timestamps
         output['estimate_errors'] = bson.Binary(pickle.dumps(self._errors_observations.tolist(),
                                                              protocol=pickle.HIGHEST_PROTOCOL))
-        output['settings'] = self.settings
         return output
 
     @classmethod

@@ -120,7 +120,7 @@ class FrameErrorsBenchmark(arvet.core.benchmark.Benchmark):
                     float(np.std(rotation_noise))
                 )
             else:
-                motion_errors = (np.nan for _ in range(8))
+                motion_errors = tuple(np.nan for _ in range(8))
 
             if len(estimates_obj['tracking']) > 0:
                 p_lost = 1.0 - (np.sum(estimates_obj['tracking']) / len(estimates_obj['tracking']))
