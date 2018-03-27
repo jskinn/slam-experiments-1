@@ -9,6 +9,7 @@ import libviso_consistency_experiment
 import orbslam_consistency_experiment
 import euroc_generated_data_experiment
 import tum_generated_data_experiment
+import generated_predict_rw_experiment
 
 
 def main():
@@ -28,6 +29,7 @@ def main():
     # Synthetic data experiments
     arvet.create_experiment.create_experiment(euroc_generated_data_experiment.EurocGeneratedDataExperiment)
     arvet.create_experiment.create_experiment(tum_generated_data_experiment.TUMGeneratedDataExperiment)
+    arvet.create_experiment.create_experiment(generated_predict_rw_experiment.GeneratedPredictRealWorldExperiment)
 
 
 if __name__ == '__main__':
