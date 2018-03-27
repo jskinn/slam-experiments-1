@@ -7,6 +7,7 @@ import arvet.config.path_manager
 import arvet.metadata.image_metadata as imeta
 import arvet.database.tests.test_entity as entity_test
 import arvet.batch_analysis.tests.mock_task_manager as mtm
+import trajectory_group as tg
 import base_generated_data_experiment as bgde
 
 
@@ -24,13 +25,18 @@ class TestBaseGeneratedDataExperiment(entity_test.EntityContract, unittest.TestC
             },
             'simulators': {'Block World': bson.ObjectId()},
             'trajectory_groups': {
-                'KITTI trajectory 1': bgde.TrajectoryGroup(
+                'KITTI trajectory 1': tg.TrajectoryGroup(
                     name='KITTI trajectory 1',
                     reference_id=bson.ObjectId(),
                     mappings=[('Block World', {'location': [12, -63.2, 291.1], 'rotation': [-22, -214, 121]})],
                     baseline_configuration={'test': bson.ObjectId()},
                     controller_id=bson.ObjectId(),
-                    generated_datasets={'Block World': bson.ObjectId()}
+                    generated_datasets={
+                        'Block World': {
+                            'max_quality': bson.ObjectId(),
+                            'min_quality': bson.ObjectId()
+                        }
+                    }
                 )
             },
             'benchmarks': {
@@ -39,8 +45,16 @@ class TestBaseGeneratedDataExperiment(entity_test.EntityContract, unittest.TestC
                 'benchmark_trajectory_drift': bson.ObjectId(),
                 'benchmark_tracking': bson.ObjectId(),
             },
-            'trial_map': {bson.ObjectId(): {bson.ObjectId(): [bson.ObjectId()]}},
-            'result_map': {bson.ObjectId(): {bson.ObjectId(): bson.ObjectId()}},
+            'trial_map': {
+                bson.ObjectId(): {
+                    bson.ObjectId(): {
+                        'trials': [bson.ObjectId(), bson.ObjectId(), bson.ObjectId()],
+                        'results': {
+                            bson.ObjectId(): bson.ObjectId()
+                        }
+                    }
+                }
+            },
             'enabled': True
         })
         return bgde.GeneratedDataExperiment(*args, **kwargs)
@@ -53,7 +67,7 @@ class TestBaseGeneratedDataExperiment(entity_test.EntityContract, unittest.TestC
         mock_cursor.count.return_value = 1
 
         self.db_client.system_collection.find.return_value = mock_cursor
-        self.db_client.image_source_collection.find.return_value = mock_cursor
+        self.db_client.image_source_collection.find.side_effect = mock_cursor
         self.db_client.benchmarks_collection.find.return_value = mock_cursor
 
         return self.db_client
