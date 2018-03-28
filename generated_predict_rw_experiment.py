@@ -484,8 +484,8 @@ class GeneratedPredictRealWorldExperiment(arvet.batch_analysis.experiment.Experi
         for result in results:
             # the first 13 values in an estimate error observation are errors,
             # The remainder are the features we're going to use to predict
-            collected_errors += result.observations[:13].tolist()
-            collected_errors += result.observations[13:].tolist()
+            collected_errors += result.observations[:, :13].tolist()
+            collected_characteristics += result.observations[:, 13:].tolist()
         return collected_characteristics, collected_errors
 
     def predict_errors(self,
