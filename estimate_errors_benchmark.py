@@ -68,28 +68,40 @@ class EstimateErrorsBenchmark(arvet.core.benchmark.Benchmark):
             num_features = trial_result.num_features
             num_matches = trial_result.num_matches
 
-            to_average = {k: v for k, v in arvet.util.associate.associate(computed_motions, mean_computed_motions,
+            unified_times = merge_timestamps((computed_motions.keys(), tracking_statistics.keys(),
+                                              num_features.keys(), num_matches.keys()))
+
+            to_average = {k: v for k, v in arvet.util.associate.associate(unified_times, mean_computed_motions,
                                                                           offset=0, max_difference=0.1)}
-            computed_keys = set(computed_motions.keys()) | set(tracking_statistics.keys())
-            computed_keys |= set(num_features.keys()) | set(num_matches.keys())
-            matches = arvet.util.associate.associate(ground_truth_motions, {k: True for k in computed_keys},
+            to_computed_motions = {k: v for k, v in arvet.util.associate.associate(unified_times, computed_motions,
+                                                                                   offset=0, max_difference=0.1)}
+            to_tracking_statistics = {k: v for k, v in
+                                      arvet.util.associate.associate(unified_times, tracking_statistics,
+                                                                     offset=0, max_difference=0.1)}
+            to_num_features = {k: v for k, v in arvet.util.associate.associate(unified_times, num_features,
+                                                                               offset=0, max_difference=0.1)}
+            to_num_matches = {k: v for k, v in arvet.util.associate.associate(unified_times, num_matches,
+                                                                              offset=0, max_difference=0.1)}
+
+            matches = arvet.util.associate.associate(ground_truth_motions, unified_times,
                                                      offset=0, max_difference=0.1)
             for match in matches:
                 gt_motion = ground_truth_motions[match[0]]
 
                 # Get estimate errors
                 motion_errors = tuple(np.nan for _ in range(12))
-                if match[1] in computed_motions:
+                if match[1] in to_computed_motions:
                     motion_errors = get_error_from_motion(
-                        motion=computed_motions[match[1]],
+                        motion=computed_motions[to_computed_motions[match[1]]],
                         gt_motion=gt_motion,
                         avg_motion=mean_computed_motions[to_average[match[1]]] if match[1] in to_average else None
                     )
 
                 # Express the tracking state as a number
                 tracking = np.nan
-                if match[1] in tracking_statistics:
-                    if tracking_statistics[match[1]] == arvet_slam.trials.slam.tracking_state.TrackingState.OK:
+                if match[1] in to_tracking_statistics:
+                    if tracking_statistics[to_tracking_statistics[match[1]]] == \
+                            arvet_slam.trials.slam.tracking_state.TrackingState.OK:
                         tracking = 1.0
                     else:
                         tracking = 0.0
@@ -97,8 +109,8 @@ class EstimateErrorsBenchmark(arvet.core.benchmark.Benchmark):
                 # Tack on more metrics to the motion errors
                 estimate_errors.append(motion_errors + (
                     tracking,
-                    num_features[match[1]] if match[1] in num_features else np.nan,
-                    num_matches[match[1]] if match[1] in num_matches else np.nan,
+                    num_features[to_num_features[match[1]]] if match[1] in to_num_features else np.nan,
+                    num_matches[to_num_matches[match[1]]] if match[1] in to_num_matches else np.nan,
                     gt_motion.location[0],
                     gt_motion.location[1],
                     gt_motion.location[2],
@@ -106,11 +118,37 @@ class EstimateErrorsBenchmark(arvet.core.benchmark.Benchmark):
                     tf.quat_angle(gt_motion.rotation_quat(w_first=True))
                 ))
 
+        if len(estimate_errors) <= 0:
+            return arvet.core.benchmark.FailedBenchmark(
+                benchmark_id=self.identifier,
+                trial_result_ids=[trial_result.identifier for trial_result in trial_results],
+                reason="No measurable errors for these trajectories"
+            )
+
         return EstimateErrorsResult(
             benchmark_id=self.identifier,
             trial_result_ids=[trial_result.identifier for trial_result in trial_results],
             estimate_errors=estimate_errors
         )
+
+
+def merge_timestamps(timestamp_sets: typing.Iterable[typing.Iterable[float]]) -> typing.Mapping[float, bool]:
+    """
+    Join together several groups of timestamps, associating similar timestamps.
+    This deals with slight variations in floating points
+    :param timestamp_sets:
+    :return:
+    """
+    unified_timestamps = {}
+    for timestamp_set in timestamp_sets:
+        times = set(timestamp_set)
+        # Remove all the timestamps that can be associated to an existing timestamp in the unified map
+        times -= {match[1] for match in arvet.util.associate.associate(
+            unified_timestamps, {time: True for time in times}, offset=0, max_difference=0.1)}
+        # Add all the times in this set that don't associate to anything
+        for time in times:
+            unified_timestamps[time] = True
+    return unified_timestamps
 
 
 def get_error_from_motion(motion: tf.Transform, gt_motion: tf.Transform, avg_motion: tf.Transform = None) \
