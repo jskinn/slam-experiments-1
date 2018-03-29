@@ -35,6 +35,8 @@ class LibVisOConsistencyExperiment(base_consistency_experiment.BaseConsistencyEx
         :param db_client: The database client, for saving declared objects too small to need a task
         :return:
         """
+        super().do_imports(task_manager, path_manager, db_client)
+
         # --------- REAL WORLD DATASETS -----------
         # Import KITTI datasets
         for sequence_num in range(11):
