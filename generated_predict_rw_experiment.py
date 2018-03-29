@@ -486,7 +486,7 @@ class GeneratedPredictRealWorldExperiment(arvet.batch_analysis.experiment.Experi
             # The remainder are the features we're going to use to predict
             collected_errors += result.observations[:, :13].tolist()
             collected_characteristics += result.observations[:, 13:].tolist()
-        return collected_characteristics, collected_errors
+        return np.array(collected_characteristics), np.array(collected_errors)
 
     def predict_errors(self,
                        systems: typing.Mapping[str, bson.ObjectId],
@@ -516,7 +516,7 @@ class GeneratedPredictRealWorldExperiment(arvet.batch_analysis.experiment.Experi
             if len(train_x) <= 0 or len(train_y) <= 0:
                 logging.getLogger(__name__).info("   No real world data available for {0}".format(system_name))
                 continue
-            error = predict(
+            error = predict_many(
                 data=(train_x, train_y),
                 target_data=validation
             )
@@ -527,7 +527,7 @@ class GeneratedPredictRealWorldExperiment(arvet.batch_analysis.experiment.Experi
                     logging.getLogger(__name__).info("   No data available for {0} on {0}".format(
                         system_name, quality_name))
                     continue
-                error = predict(
+                error = predict_many(
                     data=(train_x, train_y),
                     target_data=validation
                 )
@@ -627,6 +627,23 @@ def partition_by_name(group: typing.Mapping[str, bson.ObjectId], names_to_includ
             {name: oid for name, oid in group.items() if name not in names_to_include})
 
 
+def predict_many(data, target_data):
+    """
+    Try and predict each dimension of the output data separately, from the same input.
+    Returns a list that is the width of the output,
+    :param data: a tuple of n,i training samples with n,j true outputs
+    :param target_data: a tuple of m,i validation samples with m,j true outputs
+    :return: A list of length j with the accuracy of predicting each column of the output.
+    """
+    scores = []
+    train_x, train_y = data
+    val_x, val_y = target_data
+    assert train_y.shape[1] == val_y.shape[1]
+    for idx in range(train_y.shape[1]):
+        scores.append(predict((train_x, train_y[:, idx]), (val_x, val_y[:, idx])))
+    return scores
+
+
 def predict(data, target_data):
     """
     Train on the first set of data, and evaluate on the second set of data.
@@ -636,11 +653,25 @@ def predict(data, target_data):
     :return:
     """
     from sklearn.ensemble import AdaBoostRegressor
-    from sklearn.model_selection import cross_val_score
+    from sklearn.preprocessing import Imputer
+    from sklearn.pipeline import Pipeline
+    # from sklearn.model_selection import cross_val_score
 
     train_x, train_y = data
     val_x, val_y = target_data
 
-    model = AdaBoostRegressor(n_estimators=300)
+    # Prune out nans in the output
+    valid_indices = np.argwhere(np.invert(np.isnan(train_y)))
+    train_x = train_x[valid_indices, :]
+    train_y = train_y[valid_indices]
+    valid_indices = np.argwhere(np.invert(np.isnan(val_y)))
+    val_x = val_x[valid_indices, :]
+    val_y = val_y[valid_indices]
+
+    # Build the data processing pipeline, including preprocessing for missing values
+    model = Pipeline([
+        ('imputer', Imputer(missing_values='NaN', strategy='mean', axis=0)),
+        ('regressor', AdaBoostRegressor(n_estimators=300))
+    ])
     model.fit(train_x, train_y)
-    return cross_val_score(model, val_x, val_y, scoring='neg_mean_squared_error')
+    return model.score(val_x, val_y)
