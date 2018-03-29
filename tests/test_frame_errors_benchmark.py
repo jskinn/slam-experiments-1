@@ -1,11 +1,13 @@
 # Copyright (c) 2017, John Skinner
 import unittest
 import numpy as np
+import pickle
 import bson
 import copy
 import transforms3d as tf3d
 import arvet.util.transform as tf
 import arvet.util.trajectory_helpers as th
+import arvet.util.dict_utils as du
 import arvet.database.tests.test_entity
 import arvet.core.sequence_type
 import arvet.core.trial_result
@@ -294,3 +296,71 @@ class TestFrameErrorsBenchmark(arvet.database.tests.test_entity.EntityContract, 
 
 def collect_values(result, idx):
     return np.array([err[idx] for err in result.frame_errors.values()])
+
+
+class TestEstimateErrorsResult(arvet.database.tests.test_entity.EntityContract, unittest.TestCase):
+
+    def setUp(self):
+        self.random = np.random.RandomState(1311)   # Use a random stream to make the results consistent
+        trajectory = create_random_trajectory(self.random)
+        self.system_id = bson.ObjectId()
+        self.trial_results = []
+        self.noise = []
+        for _ in range(10):
+            noisy_trajectory, noise = create_noise(trajectory, self.random)
+            self.trial_results.append(MockTrialResult(
+                gt_trajectory=trajectory,
+                comp_trajectory=noisy_trajectory,
+                system_id=self.system_id
+            ))
+            self.noise.append(noise)
+
+    def get_class(self):
+        return feb.FrameErrorsResult
+
+    def make_instance(self, *args, **kwargs):
+        du.defaults(kwargs, {
+            'benchmark_id': np.random.randint(0, 10),
+            'trial_result_ids': [bson.ObjectId() for _ in range(4)],
+            'frame_errors': {
+                time: [np.random.uniform(-100, 100) for _ in range(18)]
+                for time in range(100)
+            },
+        })
+        return feb.FrameErrorsResult(*args, **kwargs)
+
+    def assert_models_equal(self, benchmark_result1, benchmark_result2):
+        """
+        Helper to assert that two benchmarks are equal
+        :param benchmark_result1: FrameErrorsResult
+        :param benchmark_result2: FrameErrorsResult
+        :return:
+        """
+        if (not isinstance(benchmark_result1, feb.FrameErrorsResult) or
+                not isinstance(benchmark_result2, feb.FrameErrorsResult)):
+            self.fail('object was not a FrameErrorsResult')
+        self.assertEqual(benchmark_result1.identifier, benchmark_result2.identifier)
+        self.assertEqual(benchmark_result1.success, benchmark_result2.success)
+        self.assertEqual(benchmark_result1.benchmark, benchmark_result2.benchmark)
+        self.assertEqual(benchmark_result1.trial_results, benchmark_result2.trial_results)
+        self.assertEqual(benchmark_result1.frame_errors, benchmark_result2.frame_errors)
+
+    def assert_serialized_equal(self, s_model1, s_model2):
+        """
+        Override assert for serialized models equal to measure the bson more directly.
+        :param s_model1:
+        :param s_model2:
+        :return:
+        """
+        self.assertEqual(set(s_model1.keys()), set(s_model2.keys()))
+        for key in s_model1.keys():
+            if key is not 'frame_errors' and key is not 'trial_results':
+                self.assertEqual(s_model1[key], s_model2[key])
+
+        # Special case for sets
+        self.assertEqual(set(s_model1['trial_results']), set(s_model2['trial_results']))
+
+        # Special case for BSON
+        errors1 = pickle.loads(s_model1['frame_errors'])
+        errors2 = pickle.loads(s_model2['frame_errors'])
+        self.assertEqual(errors1, errors2)

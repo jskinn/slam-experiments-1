@@ -1,11 +1,13 @@
 # Copyright (c) 2017, John Skinner
 import unittest
 import numpy as np
+import pickle
 import bson
 import copy
 import transforms3d as tf3d
 import arvet.util.transform as tf
 import arvet.util.trajectory_helpers as th
+import arvet.util.dict_utils as du
 import arvet.database.tests.test_entity
 import arvet.core.sequence_type
 import arvet.core.trial_result
@@ -268,3 +270,74 @@ class TestEstimateErrorsBenchmark(arvet.database.tests.test_entity.EntityContrac
         # But then, changes to the orientation tweak the relative location, and hence the motion
         self.assertLessEqual(np.max(result.observations[:, 3]), 150)
         self.assertLessEqual(np.max(result.observations[:, 5]), np.pi/32)
+
+
+class TestEstimateErrorsResult(arvet.database.tests.test_entity.EntityContract, unittest.TestCase):
+
+    def setUp(self):
+        self.random = np.random.RandomState(1311)   # Use a random stream to make the results consistent
+        trajectory = create_random_trajectory(self.random)
+        self.system_id = bson.ObjectId()
+        self.trial_results = []
+        self.noise = []
+        for _ in range(10):
+            noisy_trajectory, noise = create_noise(trajectory, self.random)
+            self.trial_results.append(MockTrialResult(
+                gt_trajectory=trajectory,
+                comp_trajectory=noisy_trajectory,
+                system_id=self.system_id
+            ))
+            self.noise.append(noise)
+
+    def get_class(self):
+        return eeb.EstimateErrorsResult
+
+    def make_instance(self, *args, **kwargs):
+        du.defaults(kwargs, {
+            'benchmark_id': np.random.randint(0, 10),
+            'trial_result_ids': [bson.ObjectId() for _ in range(4)],
+            'estimate_errors': [
+                [np.random.uniform(-100, 100) for _ in range(20)]
+                for _ in range(1000)
+            ],
+        })
+        return eeb.EstimateErrorsResult(*args, **kwargs)
+
+    def assert_models_equal(self, benchmark_result1, benchmark_result2):
+        """
+        Helper to assert that two benchmarks are equal
+        :param benchmark_result1: EstimateErrorsResult
+        :param benchmark_result2: EstimateErrorsResult
+        :return:
+        """
+        if (not isinstance(benchmark_result1, eeb.EstimateErrorsResult) or
+                not isinstance(benchmark_result2, eeb.EstimateErrorsResult)):
+            self.fail('object was not a EstimateErrorsResult')
+        self.assertEqual(benchmark_result1.identifier, benchmark_result2.identifier)
+        self.assertEqual(benchmark_result1.success, benchmark_result2.success)
+        self.assertEqual(benchmark_result1.benchmark, benchmark_result2.benchmark)
+        self.assertEqual(benchmark_result1.trial_results, benchmark_result2.trial_results)
+        self.assertNPEqual(benchmark_result1.observations, benchmark_result2.observations)
+
+    def assert_serialized_equal(self, s_model1, s_model2):
+        """
+        Override assert for serialized models equal to measure the bson more directly.
+        :param s_model1:
+        :param s_model2:
+        :return:
+        """
+        self.assertEqual(set(s_model1.keys()), set(s_model2.keys()))
+        for key in s_model1.keys():
+            if key is not 'estimate_errors' and key is not 'trial_results':
+                self.assertEqual(s_model1[key], s_model2[key])
+
+        # Special case for sets
+        self.assertEqual(set(s_model1['trial_results']), set(s_model2['trial_results']))
+
+        # Special case for BSON
+        errors1 = pickle.loads(s_model1['estimate_errors'])
+        errors2 = pickle.loads(s_model2['estimate_errors'])
+        self.assertEqual(errors1, errors2)
+
+    def assertNPEqual(self, arr1, arr2):
+        self.assertTrue(np.array_equal(arr1, arr2), "Arrays {0} and {1} are not equal".format(str(arr1), str(arr2)))
