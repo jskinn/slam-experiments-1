@@ -55,9 +55,9 @@ class EstimateErrorsBenchmark(arvet.core.benchmark.Benchmark):
             )
 
         # First, we need to find the average computed trajectory, so we can estimate noise
-        mean_computed_motions = th.trajectory_to_motion_sequence(th.compute_average_trajectory([
-            trial_result.get_computed_camera_poses() for trial_result in trial_results
-        ]))
+        mean_computed_motions = th.compute_average_trajectory([
+            trial_result.get_computed_camera_motions() for trial_result in trial_results
+        ])
 
         # Then, tally all the errors for all the computed trajectories
         estimate_errors = []
@@ -168,7 +168,7 @@ def get_error_from_motion(motion: tf.Transform, gt_motion: tf.Transform, avg_mot
             trans_error / trans_error_length,
             gt_motion.location / np.linalg.norm(gt_motion.location)))
             )
-    )
+    ) if trans_error_length > 0 else 0  # No error direction when there is no error
     rot_error = tf.quat_diff(motion.rotation_quat(w_first=True), gt_motion.rotation_quat(w_first=True))
 
     # Noise
@@ -197,7 +197,7 @@ def get_error_from_motion(motion: tf.Transform, gt_motion: tf.Transform, avg_mot
                 trans_noise / trans_noise_length,
                 gt_motion.location / np.linalg.norm(gt_motion.location)))
                 )
-        )
+        ) if trans_noise_length > 0 else 0  # No noise direction for 0 noise
         rot_noise = tf.quat_diff(motion.rotation_quat(w_first=True), avg_motion.rotation_quat(w_first=True))
 
         return (

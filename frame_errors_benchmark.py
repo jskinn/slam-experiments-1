@@ -64,8 +64,21 @@ class FrameErrorsBenchmark(arvet.core.benchmark.Benchmark):
 
             computed_keys = set(computed_motions.keys()) | set(tracking_statistics.keys())
             computed_keys |= set(num_features.keys()) | set(num_matches.keys())
-            matches = arvet.util.associate.associate(ground_truth_motions, {k: True for k in computed_keys},
-                                                     offset=0, max_difference=0.1)
+
+            # Join together all the timestamps for the different things in the trial result
+            # We find a unified set of timestamps, and then match back from those to each of the sets of data.
+            unified_times = merge_timestamps((computed_motions.keys(), tracking_statistics.keys(),
+                                              num_features.keys(), num_matches.keys()))
+            to_computed_motions = {k: v for k, v in arvet.util.associate.associate(
+                unified_times, computed_motions, offset=0, max_difference=0.1)}
+            to_tracking_statistics = {k: v for k, v in arvet.util.associate.associate(
+                unified_times, tracking_statistics, offset=0, max_difference=0.1)}
+            to_num_features = {k: v for k, v in arvet.util.associate.associate(
+                unified_times, num_features, offset=0, max_difference=0.1)}
+            to_num_matches = {k: v for k, v in arvet.util.associate.associate(
+                unified_times, num_matches, offset=0, max_difference=0.1)}
+
+            matches = arvet.util.associate.associate(ground_truth_motions, unified_times, offset=0, max_difference=0.1)
             for match in matches:
                 if match[0] not in estimates:
                     estimates[match[0]] = {
@@ -75,25 +88,26 @@ class FrameErrorsBenchmark(arvet.core.benchmark.Benchmark):
                         'num_matches': []
                     }
 
-                if match[1] in computed_motions:
-                    estimates[match[0]]['motion'].append(computed_motions[match[1]])
+                if match[1] in to_computed_motions:
+                    estimates[match[0]]['motion'].append(computed_motions[to_computed_motions[match[1]]])
 
                 # Express the tracking state as a number
-                if match[1] in tracking_statistics:
-                    if tracking_statistics[match[1]] == arvet_slam.trials.slam.tracking_state.TrackingState.OK:
+                if match[1] in to_tracking_statistics:
+                    if tracking_statistics[to_tracking_statistics[match[1]]] == \
+                            arvet_slam.trials.slam.tracking_state.TrackingState.OK:
                         estimates[match[0]]['tracking'].append(1.0)
                     else:
                         estimates[match[0]]['tracking'].append(0.0)
 
-                if match[1] in num_features:
-                    estimates[match[0]]['num_features'].append(num_features[match[1]])
-                if match[1] in num_matches:
-                    estimates[match[0]]['num_matches'].append(num_matches[match[1]])
+                if match[1] in to_num_features:
+                    estimates[match[0]]['num_features'].append(num_features[to_num_features[match[1]]])
+                if match[1] in to_num_matches:
+                    estimates[match[0]]['num_matches'].append(num_matches[to_num_matches[match[1]]])
 
         # Now that we have all the estimates, aggregate the errors
         frame_errors = {}
         for gt_time, estimates_obj in estimates.items():
-            if len(estimates_obj['motion'] > 0):
+            if len(estimates_obj['motion']) > 0:
                 mean_estimated_motion = tf.compute_average_pose(estimates_obj['motion'])
                 location_errors = [np.linalg.norm(motion.location - ground_truth_motions[gt_time].location)
                                    for motion in estimates_obj['motion']]
@@ -153,11 +167,37 @@ class FrameErrorsBenchmark(arvet.core.benchmark.Benchmark):
                 float(np.linalg.norm(ground_truth_motions[gt_time].location)),
                 tf.quat_angle(ground_truth_motions[gt_time].rotation_quat(True))
             )
+
+        if len(frame_errors) <= 0:
+            return arvet.core.benchmark.FailedBenchmark(
+                benchmark_id=self.identifier,
+                trial_result_ids=[trial_result.identifier for trial_result in trial_results],
+                reason="No measurable errors for these trajectories"
+            )
         return FrameErrorsResult(
             benchmark_id=self.identifier,
             trial_result_ids=[trial_result.identifier for trial_result in trial_results],
             frame_errors=frame_errors
         )
+
+
+def merge_timestamps(timestamp_sets: typing.Iterable[typing.Iterable[float]]) -> typing.Mapping[float, bool]:
+    """
+    Join together several groups of timestamps, associating similar timestamps.
+    This deals with slight variations in floating points
+    :param timestamp_sets:
+    :return:
+    """
+    unified_timestamps = {}
+    for timestamp_set in timestamp_sets:
+        times = set(timestamp_set)
+        # Remove all the timestamps that can be associated to an existing timestamp in the unified map
+        times -= {match[1] for match in arvet.util.associate.associate(
+            unified_timestamps, {time: True for time in times}, offset=0, max_difference=0.1)}
+        # Add all the times in this set that don't associate to anything
+        for time in times:
+            unified_timestamps[time] = True
+    return unified_timestamps
 
 
 class FrameErrorsResult(arvet.core.benchmark.BenchmarkResult):
@@ -188,10 +228,8 @@ class FrameErrorsResult(arvet.core.benchmark.BenchmarkResult):
 
     def serialize(self):
         output = super().serialize()
-        output['timestamps'] = self.timestamps
         output['frame_errors'] = bson.Binary(pickle.dumps(self._frame_errors,
                                                           protocol=pickle.HIGHEST_PROTOCOL))
-        output['settings'] = self.settings
         return output
 
     @classmethod

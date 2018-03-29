@@ -11,7 +11,7 @@ import arvet.core.sequence_type
 import arvet.core.trial_result
 import arvet.core.benchmark
 import arvet_slam.trials.slam.tracking_state as tracking_state
-import estimate_errors_benchmark as eeb
+import frame_errors_benchmark as feb
 
 
 def create_random_trajectory(random_state, duration=600, length=10):
@@ -122,7 +122,7 @@ class MockTrialResult(arvet.core.trial_result.TrialResult):
         return self.tracking_states
 
 
-class TestEstimateErrorsBenchmark(arvet.database.tests.test_entity.EntityContract, unittest.TestCase):
+class TestFrameErrorsBenchmark(arvet.database.tests.test_entity.EntityContract, unittest.TestCase):
 
     def setUp(self):
         self.random = np.random.RandomState(1311)   # Use a random stream to make the results consistent
@@ -140,10 +140,10 @@ class TestEstimateErrorsBenchmark(arvet.database.tests.test_entity.EntityContrac
             self.noise.append(noise)
 
     def get_class(self):
-        return eeb.EstimateErrorsBenchmark
+        return feb.FrameErrorsBenchmark
 
     def make_instance(self, *args, **kwargs):
-        return eeb.EstimateErrorsBenchmark(*args, **kwargs)
+        return feb.FrameErrorsBenchmark(*args, **kwargs)
 
     def assert_models_equal(self, benchmark1, benchmark2):
         """
@@ -152,13 +152,13 @@ class TestEstimateErrorsBenchmark(arvet.database.tests.test_entity.EntityContrac
         :param benchmark2: BenchmarkRPE
         :return:
         """
-        if (not isinstance(benchmark1, eeb.EstimateErrorsBenchmark) or
-                not isinstance(benchmark2, eeb.EstimateErrorsBenchmark)):
+        if (not isinstance(benchmark1, feb.FrameErrorsBenchmark) or
+                not isinstance(benchmark2, feb.FrameErrorsBenchmark)):
             self.fail('object was not a EstimateErrorsBenchmark')
         self.assertEqual(benchmark1.identifier, benchmark2.identifier)
 
     def test_benchmark_results_returns_a_benchmark_result(self):
-        benchmark = eeb.EstimateErrorsBenchmark()
+        benchmark = feb.FrameErrorsBenchmark()
         result = benchmark.benchmark_results(self.trial_results)
         self.assertIsInstance(result, arvet.core.benchmark.BenchmarkResult)
         self.assertNotIsInstance(result, arvet.core.benchmark.FailedBenchmark)
@@ -174,7 +174,7 @@ class TestEstimateErrorsBenchmark(arvet.database.tests.test_entity.EntityContrac
         )]
 
         # Perform the benchmark
-        benchmark = eeb.EstimateErrorsBenchmark()
+        benchmark = feb.FrameErrorsBenchmark()
         result = benchmark.benchmark_results(mixed_trial_results)
         self.assertIsInstance(result, arvet.core.benchmark.FailedBenchmark)
 
@@ -196,37 +196,43 @@ class TestEstimateErrorsBenchmark(arvet.database.tests.test_entity.EntityContrac
             }
 
         # Perform the benchmark
-        benchmark = eeb.EstimateErrorsBenchmark()
+        benchmark = feb.FrameErrorsBenchmark()
         result = benchmark.benchmark_results(self.trial_results)
         self.assertIsInstance(result, arvet.core.benchmark.FailedBenchmark)
 
-    def test_benchmark_results_one_observation_per_motion_per_trial(self):
-        benchmark = eeb.EstimateErrorsBenchmark()
+    def test_benchmark_results_one_observation_per_frame(self):
+        benchmark = feb.FrameErrorsBenchmark()
         result = benchmark.benchmark_results(self.trial_results)
 
         if isinstance(result, arvet.core.benchmark.FailedBenchmark):
             print(result.reason)
 
-        self.assertEqual((len(self.trial_results) * (len(self.trial_results[0].ground_truth_trajectory) - 1), 20),
-                         result.observations.shape)
+        self.assertEqual(len(self.trial_results[0].ground_truth_trajectory) - 1, len(result.frame_errors))
+        for error_measurement in result.frame_errors.values():
+            self.assertEqual(18, len(error_measurement))
 
     def test_benchmark_results_estimates_no_error_for_identical_trajectory(self):
         # Copy the ground truth exactly
         for trial_result in self.trial_results:
             trial_result.computed_trajectory = copy.deepcopy(trial_result.ground_truth_trajectory)
 
-        benchmark = eeb.EstimateErrorsBenchmark()
+        benchmark = feb.FrameErrorsBenchmark()
         result = benchmark.benchmark_results(self.trial_results)
 
         if isinstance(result, arvet.core.benchmark.FailedBenchmark):
             print(result.reason)
 
         # Check all the errors are zero
-        self.assertTrue(np.all(np.isclose(np.zeros(result.observations.shape[0]), result.observations[:, 3])))
+        values = collect_values(result, 0)
+        self.assertNPClose(np.zeros(values.shape), values)
+        values = collect_values(result, 1)
+        self.assertNPClose(np.zeros(values.shape), values)
         # We need more tolerance for the rotational error, because of the way the arccos
         # results in the smallest possible change producing a value around 2e-8
-        self.assertTrue(np.all(np.isclose(np.zeros(result.observations.shape[0]),
-                                          result.observations[:, 5], atol=1e-7)))
+        values = collect_values(result, 2)
+        self.assertNPClose(np.zeros(values.shape), values, atol=1e-7)
+        values = collect_values(result, 3)
+        self.assertNPClose(np.zeros(values.shape), values, atol=1e-7)
 
     def test_benchmark_results_estimates_no_error_for_noiseless_trajectory(self):
         # Create a new computed trajectory with no noise, but a fixed offset from the real trajectory
@@ -242,29 +248,49 @@ class TestEstimateErrorsBenchmark(arvet.database.tests.test_entity.EntityContrac
             )
             trial_result.computed_trajectory = comp_traj
 
-        benchmark = eeb.EstimateErrorsBenchmark()
+        benchmark = feb.FrameErrorsBenchmark()
         result = benchmark.benchmark_results(self.trial_results)
 
-        self.assertTrue(np.all(np.isclose(np.zeros(result.observations.shape[0]), result.observations[:, 3])))
-        self.assertTrue(np.all(np.isclose(np.zeros(result.observations.shape[0]),
-                                          result.observations[:, 5], atol=1e-7)))
+        # Check all the errors are zero
+        values = collect_values(result, 0)
+        self.assertNPClose(np.zeros(values.shape), values)
+        values = collect_values(result, 1)
+        self.assertNPClose(np.zeros(values.shape), values)
+        values = collect_values(result, 2)
+        self.assertNPClose(np.zeros(values.shape), values, atol=1e-7)
+        values = collect_values(result, 3)
+        self.assertNPClose(np.zeros(values.shape), values, atol=1e-7)
 
     def test_benchmark_results_estimates_no_noise_for_identical_trajectory(self):
         # Make all the trial results have exactly the same computed trajectories
         for trial_result in self.trial_results[1:]:
             trial_result.computed_trajectory = copy.deepcopy(self.trial_results[0].computed_trajectory)
 
-        benchmark = eeb.EstimateErrorsBenchmark()
+        benchmark = feb.FrameErrorsBenchmark()
         result = benchmark.benchmark_results(self.trial_results)
 
-        self.assertTrue(np.all(np.isclose(np.zeros(result.observations.shape[0]), result.observations[:, 9])))
-        self.assertTrue(np.all(np.isclose(np.zeros(result.observations.shape[0]),
-                                          result.observations[:, 11], atol=1e-7)))
+        # Check all the errors are zero
+        values = collect_values(result, 4)
+        self.assertNPClose(np.zeros(values.shape), values)
+        values = collect_values(result, 5)
+        self.assertNPClose(np.zeros(values.shape), values)
+        values = collect_values(result, 6)
+        self.assertNPClose(np.zeros(values.shape), values, atol=1e-7)
+        values = collect_values(result, 7)
+        self.assertNPClose(np.zeros(values.shape), values, atol=1e-7)
 
     def test_benchmark_results_estimates_reasonable_trajectory_error_per_frame(self):
-        benchmark = eeb.EstimateErrorsBenchmark()
+        benchmark = feb.FrameErrorsBenchmark()
         result = benchmark.benchmark_results(self.trial_results)
         # The noise added to each location is <10, converting to motions makes that <20, in each axis
         # But then, changes to the orientation tweak the relative location, and hence the motion
-        self.assertLessEqual(np.max(result.observations[:, 3]), 150)
-        self.assertLessEqual(np.max(result.observations[:, 5]), np.pi/32)
+        self.assertLessEqual(np.max(collect_values(result, 0)), 100)
+        self.assertLessEqual(np.max(collect_values(result, 2)), np.pi/32)
+
+    def assertNPClose(self, arr1, arr2, atol=1e-12):
+        self.assertTrue(np.all(np.isclose(arr1, arr2, atol=atol)),
+                        "Arrays {0} and {1} are not close".format(str(arr1), str(arr2)))
+
+
+def collect_values(result, idx):
+    return np.array([err[idx] for err in result.frame_errors.values()])
