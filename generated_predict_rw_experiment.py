@@ -33,7 +33,7 @@ class GeneratedPredictRealWorldExperiment(arvet.batch_analysis.experiment.Experi
     def __init__(self, systems=None,
                  simulators=None,
                  trajectory_groups=None,
-                 benchmarks=None, repeats=1,
+                 benchmarks=None,
                  trial_map=None, enabled=True, id_=None):
         """
         Constructor. We need parameters to load the different stored parts of this experiment
@@ -55,7 +55,6 @@ class GeneratedPredictRealWorldExperiment(arvet.batch_analysis.experiment.Experi
 
         # Benchmarks
         self._benchmarks = benchmarks if benchmarks is not None else {}
-        self._repeats = int(repeats)
 
     @property
     def systems(self) -> typing.Mapping[str, bson.ObjectId]:
@@ -246,7 +245,7 @@ class GeneratedPredictRealWorldExperiment(arvet.batch_analysis.experiment.Experi
                                                          systems=list(self.systems.values()),
                                                          image_sources=datasets,
                                                          benchmarks=list(self.benchmarks.values()),
-                                                         repeats=self._repeats)
+                                                         repeats=10)
 
         if not os.path.isdir(type(self).get_output_folder()) or changes > 100:
             task_manager.do_analysis_task(
@@ -447,25 +446,6 @@ class GeneratedPredictRealWorldExperiment(arvet.batch_analysis.experiment.Experi
             db_client=db_client
         )
 
-    def collect_observations(self, system_id: bson.ObjectId, dataset_ids: typing.Iterable[bson.ObjectId],
-                             benchmark_id: bson.ObjectId, db_client: arvet.database.client.DatabaseClient):
-        """
-        Collect together error observations of a given system from many image datasets
-        :param system_id:
-        :param dataset_ids:
-        :param benchmark_id:
-        :param db_client:
-        :return:
-        """
-        result_ids = [self.get_benchmark_result(system_id, dataset_id, benchmark_id)
-                      for dataset_id in dataset_ids]
-        results = dh.load_many_objects(db_client, db_client.results_collection,
-                                       [result_id for result_id in result_ids if result_id is not None])
-        collected_observations = []
-        for result in results:
-            collected_observations += result.observations.tolist()
-        return np.asarray(collected_observations)
-
     def collect_errors_and_input(self, system_id: bson.ObjectId, dataset_ids: typing.Iterable[bson.ObjectId],
                                  db_client: arvet.database.client.DatabaseClient):
         """
@@ -516,22 +496,22 @@ class GeneratedPredictRealWorldExperiment(arvet.batch_analysis.experiment.Experi
             if len(train_x) <= 0 or len(train_y) <= 0:
                 logging.getLogger(__name__).info("   No real world data available for {0}".format(system_name))
                 continue
-            error = predict_many(
+            logging.getLogger(__name__).info("predicting from real-world data: ...")
+            predict_many(
                 data=(train_x, train_y),
                 target_data=validation
             )
-            logging.getLogger(__name__).info("    MSE from real-world data: {0}".format(error))
-            for quality_name, world_map in generated_datasets_by_quality:
+            for quality_name, world_map in generated_datasets_by_quality.items():
                 train_x, train_y = self.collect_errors_and_input(system_id, world_map.values(), db_client)
                 if len(train_x) <= 0 or len(train_y) <= 0:
                     logging.getLogger(__name__).info("   No data available for {0} on {0}".format(
                         system_name, quality_name))
                     continue
-                error = predict_many(
+                logging.getLogger(__name__).info("predicting from {0} data: ...".format(quality_name))
+                predict_many(
                     data=(train_x, train_y),
                     target_data=validation
                 )
-                logging.getLogger(__name__).info("    MSE from {0} data: {1}".format(quality_name, error))
 
     def export_data(self, db_client: arvet.database.client.DatabaseClient):
         """
@@ -639,8 +619,35 @@ def predict_many(data, target_data):
     train_x, train_y = data
     val_x, val_y = target_data
     assert train_y.shape[1] == val_y.shape[1]
+    column_names = [
+        'x error',
+        'y error',
+        'z error',
+        'translational error length',
+        'translational error direction',
+        'rotational error',
+        'x noise',
+        'y noise',
+        'z noise',
+        'translational noise length',
+        'translational noise direction',
+        'rotational noise',
+        'tracking',
+        'number of features',
+        'number of matches',
+        'x motion',
+        'y motion',
+        'z motion',
+        'distance moved',
+        'angle rotated'
+    ]
     for idx in range(train_y.shape[1]):
-        scores.append(predict((train_x, train_y[:, idx]), (val_x, val_y[:, idx])))
+        score = predict((train_x, train_y[:, idx]), (val_x, val_y[:, idx]))
+        if np.isnan(score):
+            logging.getLogger(__name__).info("    No output available for {0}".format(column_names[idx]))
+        else:
+            logging.getLogger(__name__).info("    MSE on {0}: {1}".format(column_names[idx], score))
+        scores.append(score)
     return scores
 
 
@@ -653,25 +660,34 @@ def predict(data, target_data):
     :return:
     """
     from sklearn.ensemble import AdaBoostRegressor
-    from sklearn.preprocessing import Imputer
+    from sklearn.svm import SVR
+    from sklearn.preprocessing import Imputer, StandardScaler
     from sklearn.pipeline import Pipeline
-    # from sklearn.model_selection import cross_val_score
+    from sklearn.metrics import mean_squared_error
 
     train_x, train_y = data
     val_x, val_y = target_data
 
     # Prune out nans in the output
-    valid_indices = np.argwhere(np.invert(np.isnan(train_y)))
-    train_x = train_x[valid_indices, :]
+    valid_indices = np.nonzero(np.invert(np.isnan(train_y)))
+    train_x = train_x[valid_indices]
     train_y = train_y[valid_indices]
-    valid_indices = np.argwhere(np.invert(np.isnan(val_y)))
-    val_x = val_x[valid_indices, :]
+    valid_indices = np.nonzero(np.invert(np.isnan(val_y)))
+    val_x = val_x[valid_indices]
     val_y = val_y[valid_indices]
+
+    if len(train_y) <= 0 or len(val_y) <= 0:
+        return np.nan
 
     # Build the data processing pipeline, including preprocessing for missing values
     model = Pipeline([
         ('imputer', Imputer(missing_values='NaN', strategy='mean', axis=0)),
-        ('regressor', AdaBoostRegressor(n_estimators=300))
+        ('scaler', StandardScaler()),
+        ('regressor', SVR(kernel='linear'))
+        #('regressor', AdaBoostRegressor(n_estimators=300))
     ])
+
+    # Fit and evaluate the regressor
     model.fit(train_x, train_y)
-    return model.score(val_x, val_y)
+    predict_y = model.predict(val_x)
+    return mean_squared_error(val_y, predict_y)

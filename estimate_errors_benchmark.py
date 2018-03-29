@@ -55,9 +55,13 @@ class EstimateErrorsBenchmark(arvet.core.benchmark.Benchmark):
             )
 
         # First, we need to find the average computed trajectory, so we can estimate noise
-        mean_computed_motions = th.compute_average_trajectory([
-            trial_result.get_computed_camera_motions() for trial_result in trial_results
-        ])
+        if len(trial_results) > 1:
+            mean_computed_motions = th.compute_average_trajectory([
+                trial_result.get_computed_camera_motions() for trial_result in trial_results
+            ])
+        else:
+            # We don't want to estimate noise for a single trajectory, in that case it should always be NaN
+            mean_computed_motions = {}
 
         # Then, tally all the errors for all the computed trajectories
         estimate_errors = []
