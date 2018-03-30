@@ -196,7 +196,7 @@ class PredictSourceFromErrorExperiment(arvet.batch_analysis.experiment.Experimen
         # ORBSLAM2 - Create 2 variants, stereo and mono
         # These datasets don't have
         vocab_path = os.path.join('systems', 'ORBSLAM2', 'ORBvoc.txt')
-        for sensor_mode in {orbslam2.SensorMode.STEREO, orbslam2.SensorMode.MONOCULAR}:
+        for sensor_mode in {orbslam2.SensorMode.STEREO, orbslam2.SensorMode.MONOCULAR, orbslam2.SensorMode.RGBD}:
             self.import_system(
                 name='ORBSLAM2 {mode}'.format(mode=sensor_mode.name.lower()),
                 system=orbslam2.ORBSLAM2(
@@ -444,9 +444,9 @@ class PredictSourceFromErrorExperiment(arvet.batch_analysis.experiment.Experimen
             )
             # In the second set, we want to test cross domain evaluation by excluding entire datasets as validation
             self.analyse_validation_groups(
-                system_name='ORBSLAM2 monocular',
+                system_name=system_name,
                 validation_sets=[set(euroc_sets), set(kitti_sets)],
-                output_folder=os.path.join(type(self).get_output_folder(), 'ORBSLAM monocular', 'cross domain'),
+                output_folder=os.path.join(type(self).get_output_folder(), system_name, 'cross domain'),
                 db_client=db_client
             )
 
@@ -467,12 +467,15 @@ class PredictSourceFromErrorExperiment(arvet.batch_analysis.experiment.Experimen
                                   output_folder: str, db_client: arvet.database.client.DatabaseClient):
         import pandas as pd
         import matplotlib.pyplot as pyplot
+        import matplotlib.patches as mpatches
 
         if system_name not in self.systems:
             logging.getLogger(__name__).info("Cannot find system \"{0}\"").format(system_name)
             return
 
-        scores_by_quality = {}
+        f1scores_by_quality = {}
+        average_precision_py_quality = {}
+        pr_curves_by_quality = {}
         random_state = np.random.RandomState(16323)
         for validation_names in validation_sets:
             output = self.split_datasets_validation_and_training(self.systems[system_name], validation_names)
@@ -480,8 +483,12 @@ class PredictSourceFromErrorExperiment(arvet.batch_analysis.experiment.Experimen
 
             for quality_name, (validation_virtual_datasets, training_virtual_datasets) in \
                     virtual_datasets_by_results.items():
-                if quality_name not in scores_by_quality:
-                    scores_by_quality[quality_name] = []
+                if quality_name not in f1scores_by_quality:
+                    f1scores_by_quality[quality_name] = []
+                if quality_name not in average_precision_py_quality:
+                    average_precision_py_quality[quality_name] = []
+                if quality_name not in pr_curves_by_quality:
+                    pr_curves_by_quality[quality_name] = []
 
                 # Load the data from the results
                 training_data = load_data_from_results(training_real_world_results,
@@ -499,35 +506,69 @@ class PredictSourceFromErrorExperiment(arvet.batch_analysis.experiment.Experimen
                 validation_data = np.array(validation_data)
 
                 # Do the classification
-                score = classify(
+                f1_score, average_precision, pr_curve = classify(
                     data=(training_data[:, :-1], training_data[:, -1]),     # Watch these indexes, they're tricky
                     target_data=(validation_data[:, :-1], validation_data[:, -1])
                 )
-                scores_by_quality[quality_name].append(score)
+                f1scores_by_quality[quality_name].append(f1_score)
+                average_precision_py_quality[quality_name].append(average_precision)
+                pr_curves_by_quality[quality_name].append(pr_curve)
                 logging.getLogger(__name__).info("Output from {0} at {1} can be predicted with F1 score {2}".format(
-                    system_name, quality_name, score))
+                    system_name, quality_name, f1_score))
 
         # Build the pandas dataframe
-        df_data = {'quality': [], 'score': []}
-        for quality_name, scores in scores_by_quality.items():
-            df_data['score'] += scores
+        df_data = {'quality': [], 'f1score': [], 'avg precision': []}
+        for quality_name, scores in f1scores_by_quality.items():
+            df_data['f1score'] += scores
             df_data['quality'] += [quality_name for _ in range(len(scores))]
+            df_data['avg precision'] += average_precision_py_quality[quality_name]
         dataframe = pd.DataFrame(data=df_data)
 
-        # Boxplot the prediction score for each
+        # Boxplot the F1 score and average precision
         os.makedirs(output_folder, exist_ok=True)
-        title = "{0} source prediction score".format(system_name)
-        figure, ax = pyplot.subplots(1, 1, figsize=(14, 10), dpi=80)
-        figure.suptitle(title)
+        title = "Prediction of real or virtual from {0} output".format(system_name)
+        figure, axes = pyplot.subplots(1, 2, figsize=(20, 10), dpi=80)
 
+        ax = axes[0]
+        dataframe.boxplot(column='f1score', by='quality', ax=ax)
+        figure.suptitle(title)
         ax.tick_params(axis='x', rotation=70)
-        dataframe.boxplot(column='score', by='quality', ax=ax)
         ax.set_xlabel('')
         ax.set_ylabel('F1 Score')
 
+        ax = axes[1]
+        dataframe.boxplot(column='avg precision', by='quality', ax=ax)
+        figure.suptitle(title)
+        ax.tick_params(axis='x', rotation=70)
+        ax.set_xlabel('')
+        ax.set_ylabel('Average Precision')
+
         pyplot.tight_layout()
         pyplot.subplots_adjust(top=0.90, right=0.99)
+        figure.savefig(os.path.join(output_folder, title + '.png'))
+        pyplot.close(figure)
 
+        # Plot the pr curves
+        title = "Prediction of real or virtual from {0} precision recall curve".format(system_name)
+        figure, ax = pyplot.subplots(1, 1, figsize=(14, 10), dpi=80)
+
+        figure.suptitle(title)
+        ax.tick_params(axis='x', rotation=70)
+        ax.set_xlabel('Recall')
+        ax.set_ylabel('Precision')
+        colours = ['blue', 'orange', 'red', 'green', 'cyan', 'gold', 'magenta', 'brown', 'purple',
+                   'navy', 'darkkhaki', 'darkgreen', 'crimson']
+        colour_idx = 0
+        legend_handles = []
+        for quality_name, pr_curves in pr_curves_by_quality.items():
+            for precision, recall, _ in pr_curves:
+                ax.step(recall, precision, color=colours[colour_idx], alpha=0.3)
+            legend_handles.append(mpatches.Patch(color=colours[colour_idx], alpha=0.5, label=quality_name))
+            colour_idx += 1
+        pyplot.figlegend(handles=legend_handles, loc='upper right')
+
+        pyplot.tight_layout()
+        pyplot.subplots_adjust(top=0.90, right=0.99)
         figure.savefig(os.path.join(output_folder, title + '.png'))
         pyplot.close(figure)
 
@@ -691,7 +732,7 @@ def classify(data, target_data):
     from sklearn.svm import SVC
     from sklearn.preprocessing import Imputer, StandardScaler
     from sklearn.pipeline import Pipeline
-    from sklearn.metrics import f1_score
+    from sklearn.metrics import f1_score, average_precision_score, precision_recall_curve
 
     train_x, train_y = data
     val_x, val_y = target_data
@@ -704,17 +745,20 @@ def classify(data, target_data):
     val_x = val_x[valid_indices]
     val_y = np.asarray(val_y[valid_indices], dtype=np.int)
 
-    if len(train_y) <= 0 or len(val_y) <= 0:
+    if len(train_y) <= 0 or len(val_y) <= 0 or np.all(train_y == train_y[0]) or np.all(val_y == val_y[0]):
         return np.nan
 
     # Build the data processing pipeline, including preprocessing for missing values
     model = Pipeline([
         ('imputer', Imputer(missing_values='NaN', strategy='mean', axis=0)),
         ('scaler', StandardScaler()),
-        ('classifier', SVC(kernel='linear'))
+        ('classifier', SVC(kernel='rbf'))
     ])
 
     # Fit and evaluate the regressor
     model.fit(train_x, train_y)
     predict_y = model.predict(val_x)
-    return f1_score(val_y, predict_y)
+    f1 = f1_score(val_y, predict_y)
+    avg_precision = average_precision_score(val_y, predict_y, )
+    pr_curve = precision_recall_curve(val_y, predict_y)
+    return f1, avg_precision, pr_curve
