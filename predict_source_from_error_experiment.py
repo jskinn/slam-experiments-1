@@ -512,7 +512,8 @@ class PredictSourceFromErrorExperiment(arvet.batch_analysis.experiment.Experimen
                 )
                 f1scores_by_quality[quality_name].append(f1_score)
                 average_precision_py_quality[quality_name].append(average_precision)
-                pr_curves_by_quality[quality_name].append(pr_curve)
+                if pr_curve is not None:
+                    pr_curves_by_quality[quality_name].append(pr_curve)
                 logging.getLogger(__name__).info("Output from {0} at {1} can be predicted with F1 score {2}".format(
                     system_name, quality_name, f1_score))
 
@@ -746,7 +747,7 @@ def classify(data, target_data):
     val_y = np.asarray(val_y[valid_indices], dtype=np.int)
 
     if len(train_y) <= 0 or len(val_y) <= 0 or np.all(train_y == train_y[0]) or np.all(val_y == val_y[0]):
-        return np.nan
+        return np.nan, np.nan, None
 
     # Build the data processing pipeline, including preprocessing for missing values
     model = Pipeline([
