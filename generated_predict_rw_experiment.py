@@ -393,7 +393,7 @@ class GeneratedPredictRealWorldExperiment(arvet.batch_analysis.experiment.Experi
     def perform_analysis(self, db_client: arvet.database.client.DatabaseClient):
         """
         Use the results from generated data to try and predict the performance on some selected real world data
-        We're oging to do this system by system because different types of system use different datasets.
+        We're going to do this system by system because different types of system use different datasets.
         :param db_client:
         :return:
         """
