@@ -250,8 +250,9 @@ class PredictSourceFromErrorExperiment(arvet.batch_analysis.experiment.Experimen
         if not os.path.isdir(type(self).get_output_folder()) or changes > 100:
             task_manager.do_analysis_task(
                 experiment_id=self.identifier,
-                memory_requirements='12GB',
-                expected_duration='2:00:00'
+                num_cpus=2,
+                memory_requirements='32GB',
+                expected_duration='12:00:00'
             )
 
     def import_system(self, name: str, system: arvet.core.system.VisionSystem,
