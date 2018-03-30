@@ -394,24 +394,98 @@ class PredictSourceFromErrorExperiment(arvet.batch_analysis.experiment.Experimen
     def perform_analysis(self, db_client: arvet.database.client.DatabaseClient):
         """
         Use the results from generated data to try and predict the performance on some selected real world data
+        We're going to do this system by system because different types of system use different datasets.
         :param db_client:
         :return:
         """
-        for system_name, system_id in self.systems:
-            output = self.split_datasets_validation_and_training(system_id, {
-                'EuRoC MH_03_medium',
-                'rgbd_dataset_frieburg2_desk',
-                'KITTI trajectory 0'
-            })
-            validation_real_world_datasets, training_real_world_datasets, virtual_datasets_by_quality = output
+        random_state = np.random.RandomState(1241)
+        euroc_sets = ['EuRoC MH_01_easy', 'EuRoC MH_02_easy', 'EuRoC MH_03_medium', 'EuRoC MH_04_difficult',
+                      'EuRoC MH_05_difficult', 'EuRoC V1_01_easy', 'EuRoC V1_02_medium', 'EuRoC V1_03_difficult',
+                      'EuRoC V2_01_easy', 'EuRoC V2_02_medium', 'EuRoC V2_03_difficult']
+        tum_sets = ['rgbd_dataset_freiburg1_360', 'rgbd_dataset_frieburg1_rpy', 'rgbd_dataset_frieburg1_xyz',
+                    'rgbd_dataset_frieburg2_desk', 'rgbd_dataset_frieburg2_rpy', 'rgbd_dataset_frieburg2_xyz',
+                    'rgbd_dataset_frieburg3_structure_texture_far', 'rgbd_dataset_frieburg3_walking_xyz']
+        kitti_sets = ['KITTI trajectory {}'.format(sequence_num) for sequence_num in range(11)]
 
-            random_state = np.random.RandomState(1241)
+        # --------- MONOCULAR -----------
+        # In the first experiment, we want to to pick a validation dataset from each group to validate on.
+        self.analyse_validation_groups(
+            system_name='ORBSLAM2 monocular',
+            validation_sets=[{
+                random_state.choice(euroc_sets),
+                random_state.choice(tum_sets),
+                random_state.choice(kitti_sets)
+            } for _ in range(10)],
+            output_folder=os.path.join(type(self).get_output_folder(), 'ORBSLAM monocular', 'one from each domain'),
+            db_client=db_client
+        )
+        # In the second set, we want to test cross domain evaluation by excluding entire datasets as validation
+        self.analyse_validation_groups(
+            system_name='ORBSLAM2 monocular',
+            validation_sets=[set(euroc_sets), set(tum_sets), set(kitti_sets)],
+            output_folder=os.path.join(type(self).get_output_folder(), 'ORBSLAM monocular', 'cross domain'),
+            db_client=db_client
+        )
+
+        # --------- STEREO -----------
+        for system_name in ['ORBSLAM2 stereo', 'LibVisO']:
+            # In the first experiment, we want to to pick a validation dataset from each group to validate on.
+            self.analyse_validation_groups(
+                system_name=system_name,
+                validation_sets=[{
+                    random_state.choice(euroc_sets),
+                    random_state.choice(euroc_sets),
+                    random_state.choice(kitti_sets),
+                    random_state.choice(kitti_sets)
+                } for _ in range(10)],
+                output_folder=os.path.join(type(self).get_output_folder(), system_name, 'one from each domain'),
+                db_client=db_client
+            )
+            # In the second set, we want to test cross domain evaluation by excluding entire datasets as validation
+            self.analyse_validation_groups(
+                system_name='ORBSLAM2 monocular',
+                validation_sets=[set(euroc_sets), set(kitti_sets)],
+                output_folder=os.path.join(type(self).get_output_folder(), 'ORBSLAM monocular', 'cross domain'),
+                db_client=db_client
+            )
+
+        # --------- RGB-D -----------
+        # For RGB-D, we only have data from one domain (TUM) so we test excluding parts of that.
+        self.analyse_validation_groups(
+            system_name='ORBSLAM2 rgbd',
+            validation_sets=[{
+                random_state.choice(tum_sets),
+                random_state.choice(tum_sets),
+                random_state.choice(tum_sets)
+            } for _ in range(10)],
+            output_folder=os.path.join(type(self).get_output_folder(), 'ORBSLAM rgbd'),
+            db_client=db_client
+        )
+
+    def analyse_validation_groups(self, system_name: str, validation_sets: typing.Iterable[typing.Set[str]],
+                                  output_folder: str, db_client: arvet.database.client.DatabaseClient):
+        import pandas as pd
+        import matplotlib.pyplot as pyplot
+
+        if system_name not in self.systems:
+            logging.getLogger(__name__).info("Cannot find system \"{0}\"").format(system_name)
+            return
+
+        scores_by_quality = {}
+        random_state = np.random.RandomState(16323)
+        for validation_names in validation_sets:
+            output = self.split_datasets_validation_and_training(self.systems[system_name], validation_names)
+            validation_real_world_results, training_real_world_results, virtual_datasets_by_results = output
+
             for quality_name, (validation_virtual_datasets, training_virtual_datasets) in \
-                    virtual_datasets_by_quality.items():
+                    virtual_datasets_by_results.items():
+                if quality_name not in scores_by_quality:
+                    scores_by_quality[quality_name] = []
+
                 # Load the data from the results
-                training_data = load_data_from_results(training_real_world_datasets,
+                training_data = load_data_from_results(training_real_world_results,
                                                        training_virtual_datasets, db_client)
-                validation_data = load_data_from_results(validation_real_world_datasets,
+                validation_data = load_data_from_results(validation_real_world_results,
                                                          validation_virtual_datasets, db_client)
 
                 if len(training_data) <= 0 or len(validation_data) <= 0:
@@ -428,8 +502,32 @@ class PredictSourceFromErrorExperiment(arvet.batch_analysis.experiment.Experimen
                     data=(training_data[:, :-1], training_data[:, -1]),     # Watch these indexes, they're tricky
                     target_data=(validation_data[:, :-1], validation_data[:, -1])
                 )
+                scores_by_quality[quality_name].append(score)
                 logging.getLogger(__name__).info("Output from {0} at {1} can be predicted with F1 score {2}".format(
                     system_name, quality_name, score))
+
+        # Build the pandas dataframe
+        df_data = {'quality': [], 'score': []}
+        for quality_name, scores in scores_by_quality.items():
+            df_data['score'] += scores
+            df_data['quality'] += [quality_name for _ in range(len(scores))]
+        dataframe = pd.DataFrame(data=df_data)
+
+        # Boxplot the prediction score for each
+        os.makedirs(output_folder, exist_ok=True)
+        title = "{0} source prediction score".format(system_name)
+        figure, ax = pyplot.subplots(1, 1, figsize=(14, 10), dpi=80)
+        figure.suptitle(title)
+
+        ax.tick_params(axis='x', rotation=70)
+        dataframe.boxplot(column='score', by='quality', ax=ax)
+        ax.set_ylabel('F1 Score')
+
+        pyplot.tight_layout()
+        pyplot.subplots_adjust(top=0.90, right=0.99)
+
+        figure.savefig(os.path.join(output_folder, title + '.png'))
+        pyplot.close(figure)
 
     def split_datasets_validation_and_training(self, system_id: bson.ObjectId, validation_datasets: typing.Set[str]) \
             -> typing.Tuple[
@@ -446,31 +544,31 @@ class PredictSourceFromErrorExperiment(arvet.batch_analysis.experiment.Experimen
 
         Returns the result ids in each of these groups
         """
-        training_real_world_datasets = set()
-        validation_real_world_datasets = set()
-        virtual_datasets_by_quality = {}
+        training_real_world_results = set()
+        validation_real_world_results = set()
+        virtual_results_by_quality = {}
         for trajectory_group in self.trajectory_groups.values():
             result_id = self.get_benchmark_result(system_id, trajectory_group.reference_dataset,
                                                   self.benchmarks['Estimate Errors'])
             if result_id is not None:
                 if trajectory_group.name in validation_datasets:
-                    validation_real_world_datasets.add(result_id)
+                    validation_real_world_results.add(result_id)
                 else:
-                    training_real_world_datasets.add(result_id)
+                    training_real_world_results.add(result_id)
 
             for world_name, quality_map in trajectory_group.generated_datasets.items():
                 for quality_name, dataset_id in quality_map.items():
-                    if quality_name not in virtual_datasets_by_quality:
-                        virtual_datasets_by_quality[quality_name] = (set(), set())
+                    if quality_name not in virtual_results_by_quality:
+                        virtual_results_by_quality[quality_name] = (set(), set())
 
                     result_id = self.get_benchmark_result(system_id, trajectory_group.reference_dataset,
                                                           self.benchmarks['Estimate Errors'])
                     if result_id is not None:
                         if trajectory_group.name in validation_datasets:
-                            virtual_datasets_by_quality[quality_name][0].add(result_id)
+                            virtual_results_by_quality[quality_name][0].add(result_id)
                         else:
-                            virtual_datasets_by_quality[quality_name][1].add(result_id)
-        return validation_real_world_datasets, training_real_world_datasets, virtual_datasets_by_quality
+                            virtual_results_by_quality[quality_name][1].add(result_id)
+        return validation_real_world_results, training_real_world_results, virtual_results_by_quality
 
     def export_data(self, db_client: arvet.database.client.DatabaseClient):
         """
@@ -591,7 +689,7 @@ def classify(data, target_data):
     from sklearn.svm import SVC
     from sklearn.preprocessing import Imputer, StandardScaler
     from sklearn.pipeline import Pipeline
-    from sklearn.metrics import mean_squared_error
+    from sklearn.metrics import f1_score
 
     train_x, train_y = data
     val_x, val_y = target_data
@@ -617,4 +715,4 @@ def classify(data, target_data):
     # Fit and evaluate the regressor
     model.fit(train_x, train_y)
     predict_y = model.predict(val_x)
-    return mean_squared_error(val_y, predict_y)
+    return f1_score(val_y, predict_y)
