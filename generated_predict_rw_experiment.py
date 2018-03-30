@@ -486,7 +486,7 @@ class GeneratedPredictRealWorldExperiment(arvet.batch_analysis.experiment.Experi
                 logging.getLogger(__name__).info("Error, no generated datasets available")
                 continue
 
-            rw_errors, virtual_data_errors = self.predict_errors(
+            rw_errors, virtual_data_errors = predict_real_and_virtual_errors(
                 validation_results=validation_real_world_datasets,
                 real_world_results=training_real_world_datasets,
                 virtual_results_by_quality=virtual_datasets_by_quality,
@@ -518,31 +518,75 @@ class GeneratedPredictRealWorldExperiment(arvet.batch_analysis.experiment.Experi
         # Build the pandas dataframe
         df_data = {'source': []}
         for group_name, group_scores in group_scores.items():
+            df_data['source'] += [group_name for _ in range(len(group_scores))]
             for column_idx, error_name in enumerate(error_names):
                 if error_name not in df_data:
                     df_data[error_name] = []
                 scores = [s[column_idx] for s in group_scores]
                 df_data[error_name] += scores
-                df_data['source'] += [group_name for _ in range(len(scores))]
 
         dataframe = pd.DataFrame(data=df_data)
 
         # Boxplot each of the errors
         os.makedirs(output_folder, exist_ok=True)
-        title = "{0} error prediction scores".format(system_name)
-        figure, axes = pyplot.subplots(3, 6, squeeze=False, figsize=(30, 60), dpi=80)
-        figure.suptitle(title)
 
-        for error_name, ax in zip(error_names, [axes[0, i] for i in range(6)] +
-                                               [axes[1, i] for i in range(6)] + [axes[2, 2]]):
-            ax.set_title(error_name)
-            ax.tick_params(axis='x', rotation=70)
-            dataframe.boxplot(column=error_name, by='source', ax=ax)
-            ax.set_ylabel('Mean Squared Error' if error_name is not 'tracking' else 'F1 Score')
+        # First, the errors
+        title = "{0} error prediction scores".format(system_name)
+        figure, axes = pyplot.subplots(1, 6, figsize=(70, 10), dpi=80)
+        figure.suptitle(title)
+        for idx, error_name in enumerate([
+            'x error',
+            'y error',
+            'z error',
+            'translational error length',
+            'translational error direction',
+            'rotational error'
+        ]):
+            axes[idx].set_title(error_name)
+            axes[idx].tick_params(axis='x', rotation=90)
+            dataframe.boxplot(column=error_name, by='source', ax=axes[idx])
+            axes[idx].set_xlabel('')
+            axes[idx].set_ylabel('Mean Squared Error')
 
         pyplot.tight_layout()
         pyplot.subplots_adjust(top=0.90, right=0.99)
+        figure.savefig(os.path.join(output_folder, title + '.png'))
+        pyplot.close(figure)
 
+        # Then the noise
+        title = "{0} noise prediction scores".format(system_name)
+        figure, axes = pyplot.subplots(1, 6, figsize=(70, 10), dpi=80)
+        figure.suptitle(title)
+        for idx, error_name in enumerate([
+            'x noise',
+            'y noise',
+            'z noise',
+            'translational noise length',
+            'translational noise direction',
+            'rotational noise'
+        ]):
+            axes[idx].set_title(error_name)
+            axes[idx].tick_params(axis='x', rotation=90)
+            dataframe.boxplot(column=error_name, by='source', ax=axes[idx])
+            axes[idx].set_xlabel('')
+            axes[idx].set_ylabel('Mean Squared Error')
+
+        pyplot.tight_layout()
+        pyplot.subplots_adjust(top=0.90, right=0.99)
+        figure.savefig(os.path.join(output_folder, title + '.png'))
+        pyplot.close(figure)
+
+        # Last the tracking
+        title = "{0} tracking F1 score".format(system_name)
+        figure, ax = pyplot.subplots(1, 1, figsize=(14, 10), dpi=80)
+        figure.suptitle(title)
+        ax.tick_params(axis='x', rotation=90)
+        dataframe.boxplot(column='tracking', by='source', ax=ax)
+        ax.set_xlabel('')
+        ax.set_ylabel('F1 Score')
+
+        pyplot.tight_layout()
+        pyplot.subplots_adjust(top=0.90, right=0.99)
         figure.savefig(os.path.join(output_folder, title + '.png'))
         pyplot.close(figure)
 
@@ -586,63 +630,6 @@ class GeneratedPredictRealWorldExperiment(arvet.batch_analysis.experiment.Experi
                         else:
                             virtual_datasets_by_quality[quality_name][1].add(result_id)
         return validation_real_world_datasets, training_real_world_datasets, virtual_datasets_by_quality
-
-    def predict_errors(self, validation_results: typing.Iterable[bson.ObjectId],
-                       real_world_results: typing.Iterable[bson.ObjectId],
-                       virtual_results_by_quality: typing.Mapping[str, typing.Tuple[typing.Iterable[bson.ObjectId],
-                                                                  typing.Iterable[bson.ObjectId]]],
-                       db_client: arvet.database.client.DatabaseClient) \
-            -> typing.Tuple[typing.List[float], typing.Mapping[str, typing.List[float]]]:
-
-        # Load the validation data
-        val_x, val_y = self.collect_errors_and_input(validation_results, db_client)
-        if len(val_x) <= 0 or len(val_y) <= 0:
-            logging.getLogger(__name__).info("   No validation data available")
-            return [], {}
-
-        # Predict the error using real world data
-        train_x, train_y = self.collect_errors_and_input(real_world_results, db_client)
-        if len(train_x) <= 0 or len(train_y) <= 0:
-            logging.getLogger(__name__).info("   No real world data available")
-            real_world_scores = []
-        else:
-            logging.getLogger(__name__).info("    predicting from real-world data: ...")
-            real_world_scores = predict_errors(
-                data=(train_x, train_y),
-                target_data=(val_x, val_y)
-            )
-
-        # Predict the error using different groups of virtual data
-        # When choosing our training set, we have three choices,
-        # We can use all the virtual data,
-        # exclude the virtual data with the same path as the validation set,
-        # or train only on virtual data using the same trajectory as the validation set.
-        errors_by_group = {}
-        for quality_name, (validation_virtual_datasets, training_virtual_datasets) in virtual_results_by_quality:
-            logging.getLogger(__name__).info("predicting from {0} data: ...".format(quality_name))
-
-            # First, all data
-            train_x, train_y = self.collect_errors_and_input(validation_virtual_datasets |
-                                                             training_virtual_datasets, db_client)
-            errors_by_group['{0} all data'.format(quality_name)] = predict_errors(
-                data=(train_x, train_y),
-                target_data=(val_x, val_y)
-            )
-
-            # Missing same trajectory as validation set
-            train_x, train_y = self.collect_errors_and_input(training_virtual_datasets, db_client)
-            errors_by_group['{0} no validation trajectory'.format(quality_name)] = predict_errors(
-                data=(train_x, train_y),
-                target_data=(val_x, val_y)
-            )
-
-            # Only using data with the same trajectory as the validation set
-            train_x, train_y = self.collect_errors_and_input(validation_virtual_datasets, db_client)
-            errors_by_group['{0} only validation trajectory'.format(quality_name)] = predict_errors(
-                data=(train_x, train_y),
-                target_data=(val_x, val_y)
-            )
-        return real_world_scores, errors_by_group
 
     def export_data(self, db_client: arvet.database.client.DatabaseClient):
         """
@@ -765,6 +752,69 @@ def collect_errors_and_input(result_ids: typing.Iterable[bson.ObjectId],
     return np.array(collected_characteristics), np.array(collected_errors)
 
 
+def predict_real_and_virtual_errors(validation_results: typing.Iterable[bson.ObjectId],
+                                    real_world_results: typing.Iterable[bson.ObjectId],
+                                    virtual_results_by_quality: typing.Mapping[
+                                        str, typing.Tuple[typing.Set[bson.ObjectId],
+                                                          typing.Set[bson.ObjectId]]
+                                    ],
+                                    db_client: arvet.database.client.DatabaseClient) \
+        -> typing.Tuple[typing.List[float], typing.Mapping[str, typing.List[float]]]:
+
+    # Load the validation data
+    val_x, val_y = collect_errors_and_input(validation_results, db_client)
+    if len(val_x) <= 0 or len(val_y) <= 0:
+        logging.getLogger(__name__).info("   No validation data available")
+        return [], {}
+
+    # Predict the error using real world data
+    train_x, train_y = collect_errors_and_input(real_world_results, db_client)
+    if len(train_x) <= 0 or len(train_y) <= 0:
+        logging.getLogger(__name__).info("   No real world data available")
+        real_world_scores = []
+    else:
+        logging.getLogger(__name__).info("    predicting from real-world data: ...")
+        real_world_scores = predict_errors(
+            data=(train_x, train_y),
+            target_data=(val_x, val_y)
+        )
+
+    # Predict the error using different groups of virtual data
+    # When choosing our training set, we have three choices,
+    # We can use all the virtual data,
+    # exclude the virtual data with the same path as the validation set,
+    # or train only on virtual data using the same trajectory as the validation set.
+    errors_by_group = {}
+    for quality_name, (validation_virtual_datasets, training_virtual_datasets) in virtual_results_by_quality.items():
+        logging.getLogger(__name__).info("    predicting from {0} data: ...".format(quality_name))
+
+        # First, all data
+        train_x, train_y = collect_errors_and_input(validation_virtual_datasets |
+                                                    training_virtual_datasets, db_client)
+        if len(train_x) > 0 and len(train_y) > 0:
+            errors_by_group['{0} all data'.format(quality_name)] = predict_errors(
+                data=(train_x, train_y),
+                target_data=(val_x, val_y)
+            )
+
+        # Missing same trajectory as validation set
+        train_x, train_y = collect_errors_and_input(training_virtual_datasets, db_client)
+        if len(train_x) > 0 and len(train_y) > 0:
+            errors_by_group['{0} no validation trajectory'.format(quality_name)] = predict_errors(
+                data=(train_x, train_y),
+                target_data=(val_x, val_y)
+            )
+
+        # Only using data with the same trajectory as the validation set
+        train_x, train_y = collect_errors_and_input(validation_virtual_datasets, db_client)
+        if len(train_x) > 0 and len(train_y) > 0:
+            errors_by_group['{0} only validation trajectory'.format(quality_name)] = predict_errors(
+                data=(train_x, train_y),
+                target_data=(val_x, val_y)
+            )
+    return real_world_scores, errors_by_group
+
+
 def predict_errors(data, target_data):
     """
     Try and predict each dimension of the output data separately, from the same input.
@@ -787,7 +837,7 @@ def predict_errors(data, target_data):
     return scores
 
 
-def predict_regression(data, target_data):
+def predict_regression(data, target_data) -> float:
     """
     Train on the first set of data, and evaluate on the second set of data.
     Returns the mean squared error on the target data, which is not used during training.
@@ -828,7 +878,7 @@ def predict_regression(data, target_data):
     return mean_squared_error(val_y, predict_y)
 
 
-def predict_classification(data, target_data):
+def predict_classification(data, target_data) -> float:
     """
     Train on the first set of data, and evaluate on the second set of data.
     Returns the mean squared error on the target data, which is not used during training.
