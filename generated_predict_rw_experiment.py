@@ -122,7 +122,6 @@ class GeneratedPredictRealWorldExperiment(arvet.batch_analysis.experiment.Experi
             )
 
         # --------- REAL WORLD DATASETS -----------
-
         # Import EuRoC datasets with lists of trajectory start points for each simulator
         for name, path, mappings in [
             ('EuRoC MH_01_easy', os.path.join('datasets', 'EuRoC', 'MH_01_easy'), euroc_origins.get_MH_01_easy()),
@@ -394,124 +393,256 @@ class GeneratedPredictRealWorldExperiment(arvet.batch_analysis.experiment.Experi
     def perform_analysis(self, db_client: arvet.database.client.DatabaseClient):
         """
         Use the results from generated data to try and predict the performance on some selected real world data
+        We're oging to do this system by system because different types of system use different datasets.
         :param db_client:
         :return:
         """
-        # First, we need to flip our generated datasets around to map by quality first
-        # At the same time, collect all the real world datasets
-        real_world_datasets = {}
-        generated_datasets_by_quality = {}
+        random_state = np.random.RandomState(20142)
+        euroc_sets = ['EuRoC MH_01_easy', 'EuRoC MH_02_easy', 'EuRoC MH_03_medium', 'EuRoC MH_04_difficult',
+                      'EuRoC MH_05_difficult', 'EuRoC V1_01_easy', 'EuRoC V1_02_medium', 'EuRoC V1_03_difficult',
+                      'EuRoC V2_01_easy', 'EuRoC V2_02_medium', 'EuRoC V2_03_difficult']
+        tum_sets = ['rgbd_dataset_freiburg1_360', 'rgbd_dataset_frieburg1_rpy', 'rgbd_dataset_frieburg1_xyz',
+                    'rgbd_dataset_frieburg2_desk', 'rgbd_dataset_frieburg2_rpy', 'rgbd_dataset_frieburg2_xyz',
+                    'rgbd_dataset_frieburg3_structure_texture_far', 'rgbd_dataset_frieburg3_walking_xyz']
+        kitti_sets = ['KITTI trajectory {}'.format(sequence_num) for sequence_num in range(11)]
+
+        # --------- MONOCULAR -----------
+        # In the first experiment, we want to to pick a validation dataset from each group to validate on.
+        self.analyse_validation_groups(
+            system_name='ORBSLAM2 monocular',
+            validation_sets=[{
+                random_state.choice(euroc_sets),
+                random_state.choice(tum_sets),
+                random_state.choice(kitti_sets)
+            } for _ in range(10)],
+            output_folder=os.path.join(type(self).get_output_folder(), 'ORBSLAM monocular', 'one from each domain'),
+            db_client=db_client
+        )
+        # In the second set, we want to test cross domain evaluation by excluding entire datasets as validation
+        self.analyse_validation_groups(
+            system_name='ORBSLAM2 monocular',
+            validation_sets=[set(euroc_sets), set(tum_sets), set(kitti_sets)],
+            output_folder=os.path.join(type(self).get_output_folder(), 'ORBSLAM monocular', 'cross domain'),
+            db_client=db_client
+        )
+
+        # --------- STEREO -----------
+        for system_name in ['ORBSLAM2 stereo', 'LibVisO']:
+            # In the first experiment, we want to to pick a validation dataset from each group to validate on.
+            self.analyse_validation_groups(
+                system_name=system_name,
+                validation_sets=[{
+                    random_state.choice(euroc_sets),
+                    random_state.choice(euroc_sets),
+                    random_state.choice(kitti_sets),
+                    random_state.choice(kitti_sets)
+                } for _ in range(10)],
+                output_folder=os.path.join(type(self).get_output_folder(), system_name, 'one from each domain'),
+                db_client=db_client
+            )
+            # In the second set, we want to test cross domain evaluation by excluding entire datasets as validation
+            self.analyse_validation_groups(
+                system_name='ORBSLAM2 monocular',
+                validation_sets=[set(euroc_sets), set(kitti_sets)],
+                output_folder=os.path.join(type(self).get_output_folder(), 'ORBSLAM monocular', 'cross domain'),
+                db_client=db_client
+            )
+
+        # --------- RGB-D -----------
+        # For RGB-D, we only have data from one domain (TUM) so we test excluding parts of that.
+        self.analyse_validation_groups(
+            system_name='ORBSLAM2 rgbd',
+            validation_sets=[{
+                random_state.choice(tum_sets),
+                random_state.choice(tum_sets),
+                random_state.choice(tum_sets)
+            } for _ in range(10)],
+            output_folder=os.path.join(type(self).get_output_folder(), 'ORBSLAM rgbd'),
+            db_client=db_client
+        )
+
+    def analyse_validation_groups(self, system_name: str, validation_sets: typing.Iterable[typing.Set[str]],
+                                  output_folder: str, db_client: arvet.database.client.DatabaseClient):
+        import pandas as pd
+        import matplotlib.pyplot as pyplot
+
+        if system_name not in self.systems:
+            logging.getLogger(__name__).info("Cannot find system \"{0}\"").format(system_name)
+            return
+        group_scores = {'Real World': []}
+        for validation_set_names in validation_sets:
+            logging.getLogger(__name__).info("Predicting errors for {0} ...".format(system_name))
+            output = self.split_datasets_validation_and_training(self.systems[system_name], validation_set_names)
+            validation_real_world_datasets, training_real_world_datasets, virtual_datasets_by_quality = output
+
+            # Check we've actually got data to use
+            if len(validation_real_world_datasets) <= 0:
+                logging.getLogger(__name__).info("Error, no validation datasets available")
+                continue
+            if len(training_real_world_datasets) <= 0:
+                logging.getLogger(__name__).info("Error, no real world datasets available")
+                continue
+            if len(virtual_datasets_by_quality) <= 0:
+                logging.getLogger(__name__).info("Error, no generated datasets available")
+                continue
+
+            rw_errors, virtual_data_errors = self.predict_errors(
+                validation_results=validation_real_world_datasets,
+                real_world_results=training_real_world_datasets,
+                virtual_results_by_quality=virtual_datasets_by_quality,
+                db_client=db_client
+            )
+            group_scores['Real World'].append(rw_errors)
+            for group_name, errors in virtual_data_errors.items():
+                if group_name not in group_scores:
+                    group_scores[group_name] = [errors]
+                else:
+                    group_scores[group_name].append(errors)
+
+        error_names = [
+            'x error',
+            'y error',
+            'z error',
+            'translational error length',
+            'translational error direction',
+            'rotational error',
+            'x noise',
+            'y noise',
+            'z noise',
+            'translational noise length',
+            'translational noise direction',
+            'rotational noise',
+            'tracking'
+        ]
+
+        # Build the pandas dataframe
+        df_data = {'source': []}
+        for group_name, group_scores in group_scores.items():
+            for column_idx, error_name in enumerate(error_names):
+                if error_name not in df_data:
+                    df_data[error_name] = []
+                scores = [s[column_idx] for s in group_scores]
+                df_data[error_name] += scores
+                df_data['source'] += [group_name for _ in range(len(scores))]
+
+        dataframe = pd.DataFrame(data=df_data)
+
+        # Boxplot each of the errors
+        os.makedirs(output_folder, exist_ok=True)
+        title = "{0} error prediction scores".format(system_name)
+        figure, axes = pyplot.subplots(3, 6, squeeze=False, figsize=(30, 60), dpi=80)
+        figure.suptitle(title)
+
+        for error_name, ax in zip(error_names, [axes[0, i] for i in range(6)] +
+                                               [axes[1, i] for i in range(6)] + [axes[2, 2]]):
+            ax.set_title(error_name)
+            ax.tick_params(axis='x', rotation=70)
+            dataframe.boxplot(column=error_name, by='source', ax=ax)
+            ax.set_ylabel('Mean Squared Error' if error_name is not 'tracking' else 'F1 Score')
+
+        pyplot.tight_layout()
+        pyplot.subplots_adjust(top=0.90, right=0.99)
+
+        figure.savefig(os.path.join(output_folder, title + '.png'))
+        pyplot.close(figure)
+
+    def split_datasets_validation_and_training(self, system_id: bson.ObjectId, validation_datasets: typing.Set[str]) \
+            -> typing.Tuple[
+                typing.Set[bson.ObjectId],
+                typing.Set[bson.ObjectId],
+                typing.Mapping[str, typing.Tuple[typing.Set[bson.ObjectId], typing.Set[bson.ObjectId]]]
+            ]:
+        """
+        Split the datasets into 4 groups, based on which world they come from:
+        - Training real world datasets
+        - Validation real world datasets
+        - Training virtual datasets
+        - Validataion virtual datasets
+
+        Returns the result ids in each of these groups
+        """
+        training_real_world_datasets = set()
+        validation_real_world_datasets = set()
+        virtual_datasets_by_quality = {}
         for trajectory_group in self.trajectory_groups.values():
-            real_world_datasets[trajectory_group.name] = trajectory_group.reference_dataset
+            result_id = self.get_benchmark_result(system_id, trajectory_group.reference_dataset,
+                                                  self.benchmarks['Estimate Errors'])
+            if result_id is not None:
+                if trajectory_group.name in validation_datasets:
+                    validation_real_world_datasets.add(result_id)
+                else:
+                    training_real_world_datasets.add(result_id)
+
             for world_name, quality_map in trajectory_group.generated_datasets.items():
                 for quality_name, dataset_id in quality_map.items():
-                    if quality_name not in generated_datasets_by_quality:
-                        generated_datasets_by_quality[quality_name] = {}
-                    if world_name not in generated_datasets_by_quality[quality_name]:
-                        generated_datasets_by_quality[quality_name][world_name] = dataset_id
+                    if quality_name not in virtual_datasets_by_quality:
+                        virtual_datasets_by_quality[quality_name] = (set(), set())
 
-        # Now, partition our real world datasets into test and validation sets
-        # This time, we're going to take one image sequence from each group of datasets (TUM, EuRoC, and KITTI)
-        validation, test = partition_by_name(real_world_datasets, {
-            'EuRoC MH_03_medium',
-            'rgbd_dataset_frieburg2_desk',
-            'KITTI trajectory 0'
-        })
-        # Now, predict the error on the validation set, using the remainder of the real datasets as control
-        self.predict_errors(
-            systems=self.systems,
-            validation_datasets=validation,
-            real_world_datasets=test,
-            generated_datasets_by_quality=generated_datasets_by_quality,
-            per_estimate_benchmark=self.benchmarks['Estimate Errors'],
-            output_folder=os.path.join(type(self).get_output_folder(), 'one from each domain'),
-            db_client=db_client
-        )
+                    result_id = self.get_benchmark_result(system_id, trajectory_group.reference_dataset,
+                                                          self.benchmarks['Estimate Errors'])
+                    if result_id is not None:
+                        if trajectory_group.name in validation_datasets:
+                            virtual_datasets_by_quality[quality_name][0].add(result_id)
+                        else:
+                            virtual_datasets_by_quality[quality_name][1].add(result_id)
+        return validation_real_world_datasets, training_real_world_datasets, virtual_datasets_by_quality
 
-        # Partition into different datasets, this time taking all the datasets from a partcular group.
-        # Specifically, the KITTI datasets are going to be our validation set,
-        # So the only prediction set comes from EuRoC and/or TUM
-        validation, test = partition_by_name(real_world_datasets, {
-            'KITTI trajectory {}'.format(idx)
-            for idx in range(11)
-        })
-        # Now, predict the error on the validation set, using the remainder of the real datasets as control
-        self.predict_errors(
-            systems=self.systems,
-            validation_datasets=validation,
-            real_world_datasets=test,
-            generated_datasets_by_quality=generated_datasets_by_quality,
-            per_estimate_benchmark=self.benchmarks['Estimate Errors'],
-            output_folder=os.path.join(type(self).get_output_folder(), 'cross domain'),
-            db_client=db_client
-        )
+    def predict_errors(self, validation_results: typing.Iterable[bson.ObjectId],
+                       real_world_results: typing.Iterable[bson.ObjectId],
+                       virtual_results_by_quality: typing.Mapping[str, typing.Tuple[typing.Iterable[bson.ObjectId],
+                                                                  typing.Iterable[bson.ObjectId]]],
+                       db_client: arvet.database.client.DatabaseClient) \
+            -> typing.Tuple[typing.List[float], typing.Mapping[str, typing.List[float]]]:
 
-    def collect_errors_and_input(self, system_id: bson.ObjectId, dataset_ids: typing.Iterable[bson.ObjectId],
-                                 db_client: arvet.database.client.DatabaseClient):
-        """
-        Collect together error observations of a given system from many image datasets
-        :param system_id:
-        :param dataset_ids:
-        :param db_client:
-        :return:
-        """
-        result_ids = [self.get_benchmark_result(system_id, dataset_id, self.benchmarks['Estimate Errors'])
-                      for dataset_id in dataset_ids]
-        results = dh.load_many_objects(db_client, db_client.results_collection,
-                                       [result_id for result_id in result_ids if result_id is not None])
-        collected_errors = []
-        collected_characteristics = []
-        for result in results:
-            # the first 13 values in an estimate error observation are errors,
-            # The remainder are the features we're going to use to predict
-            collected_errors += result.observations[:, :13].tolist()
-            collected_characteristics += result.observations[:, 13:].tolist()
-        return np.array(collected_characteristics), np.array(collected_errors)
+        # Load the validation data
+        val_x, val_y = self.collect_errors_and_input(validation_results, db_client)
+        if len(val_x) <= 0 or len(val_y) <= 0:
+            logging.getLogger(__name__).info("   No validation data available")
+            return [], {}
 
-    def predict_errors(self,
-                       systems: typing.Mapping[str, bson.ObjectId],
-                       validation_datasets: typing.Mapping[str, bson.ObjectId],
-                       real_world_datasets: typing.Mapping[str, bson.ObjectId],
-                       generated_datasets_by_quality: typing.Mapping[str, typing.Mapping[str, bson.ObjectId]],
-                       per_estimate_benchmark: bson.ObjectId,
-                       output_folder: str,
-                       db_client: arvet.database.client.DatabaseClient):
-        if len(validation_datasets) <= 0:
-            logging.getLogger(__name__).info("Error, no validation datasets available")
-        if len(real_world_datasets) <= 0:
-            logging.getLogger(__name__).info("Error, no real world datasets available")
-        if len(generated_datasets_by_quality) <= 0:
-            logging.getLogger(__name__).info("Error, no generated datasets available")
-        for system_name, system_id in systems.items():
-            logging.getLogger(__name__).info("Predicting errors for {0} ...".format(system_name))
-
-            # Collect the data we want to predict
-            validation = self.collect_errors_and_input(system_id, validation_datasets.values(), db_client)
-            if len(validation[0]) <= 0 or len(validation[1]) <= 0:
-                logging.getLogger(__name__).info("   No validation data available for {0}".format(system_name))
-                continue
-
-            # Predict the error
-            train_x, train_y = self.collect_errors_and_input(system_id, real_world_datasets.values(), db_client)
-            if len(train_x) <= 0 or len(train_y) <= 0:
-                logging.getLogger(__name__).info("   No real world data available for {0}".format(system_name))
-                continue
-            logging.getLogger(__name__).info("predicting from real-world data: ...")
-            predict_many(
+        # Predict the error using real world data
+        train_x, train_y = self.collect_errors_and_input(real_world_results, db_client)
+        if len(train_x) <= 0 or len(train_y) <= 0:
+            logging.getLogger(__name__).info("   No real world data available")
+            real_world_scores = []
+        else:
+            logging.getLogger(__name__).info("    predicting from real-world data: ...")
+            real_world_scores = predict_errors(
                 data=(train_x, train_y),
-                target_data=validation
+                target_data=(val_x, val_y)
             )
-            for quality_name, world_map in generated_datasets_by_quality.items():
-                train_x, train_y = self.collect_errors_and_input(system_id, world_map.values(), db_client)
-                if len(train_x) <= 0 or len(train_y) <= 0:
-                    logging.getLogger(__name__).info("   No data available for {0} on {0}".format(
-                        system_name, quality_name))
-                    continue
-                logging.getLogger(__name__).info("predicting from {0} data: ...".format(quality_name))
-                predict_many(
-                    data=(train_x, train_y),
-                    target_data=validation
-                )
+
+        # Predict the error using different groups of virtual data
+        # When choosing our training set, we have three choices,
+        # We can use all the virtual data,
+        # exclude the virtual data with the same path as the validation set,
+        # or train only on virtual data using the same trajectory as the validation set.
+        errors_by_group = {}
+        for quality_name, (validation_virtual_datasets, training_virtual_datasets) in virtual_results_by_quality:
+            logging.getLogger(__name__).info("predicting from {0} data: ...".format(quality_name))
+
+            # First, all data
+            train_x, train_y = self.collect_errors_and_input(validation_virtual_datasets |
+                                                             training_virtual_datasets, db_client)
+            errors_by_group['{0} all data'.format(quality_name)] = predict_errors(
+                data=(train_x, train_y),
+                target_data=(val_x, val_y)
+            )
+
+            # Missing same trajectory as validation set
+            train_x, train_y = self.collect_errors_and_input(training_virtual_datasets, db_client)
+            errors_by_group['{0} no validation trajectory'.format(quality_name)] = predict_errors(
+                data=(train_x, train_y),
+                target_data=(val_x, val_y)
+            )
+
+            # Only using data with the same trajectory as the validation set
+            train_x, train_y = self.collect_errors_and_input(validation_virtual_datasets, db_client)
+            errors_by_group['{0} only validation trajectory'.format(quality_name)] = predict_errors(
+                data=(train_x, train_y),
+                target_data=(val_x, val_y)
+            )
+        return real_world_scores, errors_by_group
 
     def export_data(self, db_client: arvet.database.client.DatabaseClient):
         """
@@ -602,12 +733,39 @@ def update_schema(serialized: dict, db_client: arvet.database.client.DatabaseCli
                 del serialized['benchmarks'][key]
 
 
-def partition_by_name(group: typing.Mapping[str, bson.ObjectId], names_to_include: typing.Set[str]):
+def partition_by_name(group: typing.Mapping[str, bson.ObjectId], names_to_include: typing.Set[str]) \
+        -> typing.Tuple[typing.Mapping[str, bson.ObjectId], typing.Mapping[str, bson.ObjectId]]:
+    """
+    Split named is into two groups based on their names
+    First group only includes the given names, and the second group everything else.
+    :param group:
+    :param names_to_include:
+    :return:
+    """
     return ({name: oid for name, oid in group.items() if name in names_to_include},
             {name: oid for name, oid in group.items() if name not in names_to_include})
 
 
-def predict_many(data, target_data):
+def collect_errors_and_input(result_ids: typing.Iterable[bson.ObjectId],
+                             db_client: arvet.database.client.DatabaseClient):
+    """
+    Collect together error observations from a given set of result ids
+    :param result_ids:
+    :param db_client:
+    :return:
+    """
+    results = dh.load_many_objects(db_client, db_client.results_collection, result_ids)
+    collected_errors = []
+    collected_characteristics = []
+    for result in results:
+        # the first 13 values in an estimate error observation are errors,
+        # The remainder are the features we're going to use to predict
+        collected_errors += result.observations[:, :13].tolist()
+        collected_characteristics += result.observations[:, 13:].tolist()
+    return np.array(collected_characteristics), np.array(collected_errors)
+
+
+def predict_errors(data, target_data):
     """
     Try and predict each dimension of the output data separately, from the same input.
     Returns a list that is the width of the output,
@@ -619,47 +777,25 @@ def predict_many(data, target_data):
     train_x, train_y = data
     val_x, val_y = target_data
     assert train_y.shape[1] == val_y.shape[1]
-    column_names = [
-        'x error',
-        'y error',
-        'z error',
-        'translational error length',
-        'translational error direction',
-        'rotational error',
-        'x noise',
-        'y noise',
-        'z noise',
-        'translational noise length',
-        'translational noise direction',
-        'rotational noise',
-        'tracking',
-        'number of features',
-        'number of matches',
-        'x motion',
-        'y motion',
-        'z motion',
-        'distance moved',
-        'angle rotated'
-    ]
     for idx in range(train_y.shape[1]):
-        score = predict((train_x, train_y[:, idx]), (val_x, val_y[:, idx]))
-        if np.isnan(score):
-            logging.getLogger(__name__).info("    No output available for {0}".format(column_names[idx]))
+        if idx == 12:
+            # metric 12 is whether or not the system is lost, a binary value, so we classify
+            scores.append(predict_classification((train_x, train_y[:, idx]), (val_x, val_y[:, idx])))
         else:
-            logging.getLogger(__name__).info("    MSE on {0}: {1}".format(column_names[idx], score))
-        scores.append(score)
+            # All other values are real-valued, so we do regression.
+            scores.append(predict_regression((train_x, train_y[:, idx]), (val_x, val_y[:, idx])))
     return scores
 
 
-def predict(data, target_data):
+def predict_regression(data, target_data):
     """
     Train on the first set of data, and evaluate on the second set of data.
     Returns the mean squared error on the target data, which is not used during training.
+    This performs regression using an Support Vector Machine, use when the value it learn in continuous
     :param data:
     :param target_data:
     :return:
     """
-    from sklearn.ensemble import AdaBoostRegressor
     from sklearn.svm import SVR
     from sklearn.preprocessing import Imputer, StandardScaler
     from sklearn.pipeline import Pipeline
@@ -684,10 +820,50 @@ def predict(data, target_data):
         ('imputer', Imputer(missing_values='NaN', strategy='mean', axis=0)),
         ('scaler', StandardScaler()),
         ('regressor', SVR(kernel='linear'))
-        #('regressor', AdaBoostRegressor(n_estimators=300))
     ])
 
     # Fit and evaluate the regressor
     model.fit(train_x, train_y)
     predict_y = model.predict(val_x)
     return mean_squared_error(val_y, predict_y)
+
+
+def predict_classification(data, target_data):
+    """
+    Train on the first set of data, and evaluate on the second set of data.
+    Returns the mean squared error on the target data, which is not used during training.
+    This performs classificaion, use when the
+    :param data:
+    :param target_data:
+    :return:
+    """
+    from sklearn.svm import SVC
+    from sklearn.preprocessing import Imputer, StandardScaler
+    from sklearn.pipeline import Pipeline
+    from sklearn.metrics import f1_score
+
+    train_x, train_y = data
+    val_x, val_y = target_data
+
+    # Prune out nans in the output, and convert to integers
+    valid_indices = np.nonzero(np.invert(np.isnan(train_y)))
+    train_x = train_x[valid_indices]
+    train_y = np.asarray(train_y[valid_indices], dtype=np.int)
+    valid_indices = np.nonzero(np.invert(np.isnan(val_y)))
+    val_x = val_x[valid_indices]
+    val_y = np.asarray(val_y[valid_indices], dtype=np.int)
+
+    if len(train_y) <= 0 or len(val_y) <= 0:
+        return np.nan
+
+    # Build the data processing pipeline, including preprocessing for missing values
+    model = Pipeline([
+        ('imputer', Imputer(missing_values='NaN', strategy='mean', axis=0)),
+        ('scaler', StandardScaler()),
+        ('classifier', SVC(kernel='linear'))
+    ])
+
+    # Fit and evaluate the regressor
+    model.fit(train_x, train_y)
+    predict_y = model.predict(val_x)
+    return f1_score(val_y, predict_y)
