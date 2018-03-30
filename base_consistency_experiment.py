@@ -504,10 +504,11 @@ class BaseConsistencyExperiment(arvet.batch_analysis.simple_experiment.SimpleExp
                     system_name, dataset_name))
 
                 result_id = self.get_benchmark_result(system_id, dataset_id, self.benchmarks['Estimate Error'])
-                benchmark_result = dh.load_object(db_client, db_client.trials_collection, result_id) \
+                benchmark_result = dh.load_object(db_client, db_client.results_collection, result_id) \
                     if result_id is not None else None
-                if benchmark_result is not None:
-
+                if benchmark_result is None:
+                    logging.getLogger(__name__).info("    .... no result available")
+                else:
                     dataframe = pd.DataFrame(benchmark_result.observations, columns=[
                         'x error',
                         'y error',
@@ -539,16 +540,16 @@ class BaseConsistencyExperiment(arvet.batch_analysis.simple_experiment.SimpleExp
                     figure.suptitle(title)
 
                     ax = figure.add_subplot(111)
+                    img = ax.matshow(correlation, aspect='auto', cmap=pyplot.get_cmap('RdBu'),
+                                     norm=midpoint_normalize.MidpointNormalize(midpoint=0))
                     ax.set_xticks(range(len(correlation.columns)))
                     ax.set_xticklabels(correlation.columns, rotation='vertical')
                     ax.set_yticks(range(len(correlation.columns)))
                     ax.set_yticklabels(correlation.columns)
-                    ax.matshow(correlation, aspect='auto', cmap=pyplot.get_cmap('RdBu'),
-                               norm=midpoint_normalize.MidpointNormalize(midpoint=0))
+                    figure.colorbar(img, ax=ax)
 
                     pyplot.tight_layout()
-                    pyplot.subplots_adjust(top=0.90, right=0.99)
-
+                    pyplot.subplots_adjust(top=0.75, right=0.99)
                     figure.savefig(os.path.join(save_path, title + '.png'))
                     pyplot.close(figure)
                     with open(os.path.join(save_path, title + '.txt'), 'w') as corr_file:
