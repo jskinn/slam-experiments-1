@@ -192,10 +192,10 @@ class GeneratedPredictRealWorldExperiment(arvet.batch_analysis.experiment.Experi
             db_client=db_client
         )
 
-        # ORBSLAM2 - Create 2 variants, stereo and mono
+        # ORBSLAM2 - Create 3 variants; stereo, mono, and rgbd
         # These datasets don't have
         vocab_path = os.path.join('systems', 'ORBSLAM2', 'ORBvoc.txt')
-        for sensor_mode in {orbslam2.SensorMode.STEREO, orbslam2.SensorMode.MONOCULAR}:
+        for sensor_mode in {orbslam2.SensorMode.STEREO, orbslam2.SensorMode.MONOCULAR, orbslam2.SensorMode.RGBD}:
             self.import_system(
                 name='ORBSLAM2 {mode}'.format(mode=sensor_mode.name.lower()),
                 system=orbslam2.ORBSLAM2(
@@ -443,9 +443,9 @@ class GeneratedPredictRealWorldExperiment(arvet.batch_analysis.experiment.Experi
             )
             # In the second set, we want to test cross domain evaluation by excluding entire datasets as validation
             self.analyse_validation_groups(
-                system_name='ORBSLAM2 monocular',
+                system_name=system_name,
                 validation_sets=[set(euroc_sets), set(kitti_sets)],
-                output_folder=os.path.join(type(self).get_output_folder(), 'ORBSLAM monocular', 'cross domain'),
+                output_folder=os.path.join(type(self).get_output_folder(), system_name, 'cross domain'),
                 db_client=db_client
             )
 
@@ -468,7 +468,7 @@ class GeneratedPredictRealWorldExperiment(arvet.batch_analysis.experiment.Experi
         import matplotlib.pyplot as pyplot
 
         if system_name not in self.systems:
-            logging.getLogger(__name__).info("Cannot find system \"{0}\"").format(system_name)
+            logging.getLogger(__name__).info("Cannot find system \"{0}\"".format(system_name))
             return
         group_scores = {'Real World': []}
         for validation_set_names in validation_sets:
@@ -534,7 +534,6 @@ class GeneratedPredictRealWorldExperiment(arvet.batch_analysis.experiment.Experi
         # First, the errors
         title = "{0} error prediction scores".format(system_name)
         figure, axes = pyplot.subplots(1, 6, figsize=(70, 10), dpi=80)
-        figure.suptitle(title)
         for idx, error_name in enumerate([
             'x error',
             'y error',
@@ -549,6 +548,7 @@ class GeneratedPredictRealWorldExperiment(arvet.batch_analysis.experiment.Experi
             axes[idx].set_xlabel('')
             axes[idx].set_ylabel('Mean Squared Error')
 
+        figure.suptitle(title)
         pyplot.tight_layout()
         pyplot.subplots_adjust(top=0.90, right=0.99)
         figure.savefig(os.path.join(output_folder, title + '.png'))
@@ -557,7 +557,6 @@ class GeneratedPredictRealWorldExperiment(arvet.batch_analysis.experiment.Experi
         # Then the noise
         title = "{0} noise prediction scores".format(system_name)
         figure, axes = pyplot.subplots(1, 6, figsize=(70, 10), dpi=80)
-        figure.suptitle(title)
         for idx, error_name in enumerate([
             'x noise',
             'y noise',
@@ -571,7 +570,7 @@ class GeneratedPredictRealWorldExperiment(arvet.batch_analysis.experiment.Experi
             dataframe.boxplot(column=error_name, by='source', ax=axes[idx])
             axes[idx].set_xlabel('')
             axes[idx].set_ylabel('Mean Squared Error')
-
+        figure.suptitle(title)
         pyplot.tight_layout()
         pyplot.subplots_adjust(top=0.90, right=0.99)
         figure.savefig(os.path.join(output_folder, title + '.png'))
@@ -580,9 +579,9 @@ class GeneratedPredictRealWorldExperiment(arvet.batch_analysis.experiment.Experi
         # Last the tracking
         title = "{0} tracking F1 score".format(system_name)
         figure, ax = pyplot.subplots(1, 1, figsize=(14, 10), dpi=80)
+        dataframe.boxplot(column='tracking', by='source', ax=ax)
         figure.suptitle(title)
         ax.tick_params(axis='x', rotation=90)
-        dataframe.boxplot(column='tracking', by='source', ax=ax)
         ax.set_xlabel('')
         ax.set_ylabel('F1 Score')
 
@@ -870,13 +869,13 @@ def predict_regression(data, target_data) -> float:
     model = Pipeline([
         ('imputer', Imputer(missing_values='NaN', strategy='mean', axis=0)),
         ('scaler', StandardScaler()),
-        ('regressor', SVR(kernel='linear'))
+        ('regressor', SVR(kernel='rbf'))
     ])
 
     # Fit and evaluate the regressor
-    model.fit(train_x, train_y)
-    predict_y = model.predict(val_x)
-    return mean_squared_error(val_y, predict_y)
+    model.fit(train_x[:100, :], train_y[:100])
+    predict_y = model.predict(val_x[:100, :])
+    return mean_squared_error(val_y[:100], predict_y)
 
 
 def predict_classification(data, target_data) -> float:
@@ -904,14 +903,14 @@ def predict_classification(data, target_data) -> float:
     val_x = val_x[valid_indices]
     val_y = np.asarray(val_y[valid_indices], dtype=np.int)
 
-    if len(train_y) <= 0 or len(val_y) <= 0:
+    if len(train_y) <= 0 or len(val_y) <= 0 or np.all(train_y == train_y[0]) or np.all(val_y == val_y[0]):
         return np.nan
 
     # Build the data processing pipeline, including preprocessing for missing values
     model = Pipeline([
         ('imputer', Imputer(missing_values='NaN', strategy='mean', axis=0)),
         ('scaler', StandardScaler()),
-        ('classifier', SVC(kernel='linear'))
+        ('classifier', SVC(kernel='rbf'))
     ])
 
     # Fit and evaluate the regressor
