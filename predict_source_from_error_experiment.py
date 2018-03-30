@@ -252,7 +252,7 @@ class PredictSourceFromErrorExperiment(arvet.batch_analysis.experiment.Experimen
                 experiment_id=self.identifier,
                 num_cpus=2,
                 memory_requirements='32GB',
-                expected_duration='12:00:00'
+                expected_duration='48:00:00'
             )
 
     def import_system(self, name: str, system: arvet.core.system.VisionSystem,
