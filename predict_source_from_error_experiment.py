@@ -521,6 +521,7 @@ class PredictSourceFromErrorExperiment(arvet.batch_analysis.experiment.Experimen
 
         ax.tick_params(axis='x', rotation=70)
         dataframe.boxplot(column='score', by='quality', ax=ax)
+        ax.set_xlabel('')
         ax.set_ylabel('F1 Score')
 
         pyplot.tight_layout()
@@ -672,9 +673,9 @@ def load_data_from_results(real_world_result_ids: typing.Iterable[bson.ObjectId]
     """
     data = []
     for result in dh.load_many_objects(db_client, db_client.results_collection, real_world_result_ids):
-        data += np.hstack((result.observations, np.ones(result.observations.shape[0], 1))).tolist()
+        data += np.hstack((result.observations, np.ones((result.observations.shape[0], 1)))).tolist()
     for result in dh.load_many_objects(db_client, db_client.results_collection, virtual_result_ids):
-        data += np.hstack((result.observations, np.zeros(result.observations.shape[0], 1))).tolist()
+        data += np.hstack((result.observations, np.zeros((result.observations.shape[0], 1)))).tolist()
     return data
 
 
@@ -694,13 +695,13 @@ def classify(data, target_data):
     train_x, train_y = data
     val_x, val_y = target_data
 
-    # Prune out nans in the output
+    # Prune out nans in the output and convert to integer
     valid_indices = np.nonzero(np.invert(np.isnan(train_y)))
     train_x = train_x[valid_indices]
-    train_y = train_y[valid_indices]
+    train_y = np.asarray(train_y[valid_indices], dtype=np.int)
     valid_indices = np.nonzero(np.invert(np.isnan(val_y)))
     val_x = val_x[valid_indices]
-    val_y = val_y[valid_indices]
+    val_y = np.asarray(val_y[valid_indices], dtype=np.int)
 
     if len(train_y) <= 0 or len(val_y) <= 0:
         return np.nan
