@@ -528,7 +528,7 @@ class GeneratedPredictRealWorldExperiment(arvet.batch_analysis.experiment.Experi
                 df_data[error_name] += scores
 
         if len(df_data['source']) <= 0:
-            logging.getLogger(__name__).info("Error, data collected, cannot plot.")
+            logging.getLogger(__name__).info("Error, no data collected, cannot plot.")
             return
         dataframe = pd.DataFrame(data=df_data)
 
