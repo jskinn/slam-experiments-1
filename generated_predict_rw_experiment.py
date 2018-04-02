@@ -402,9 +402,10 @@ class GeneratedPredictRealWorldExperiment(arvet.batch_analysis.experiment.Experi
         euroc_sets = ['EuRoC MH_01_easy', 'EuRoC MH_02_easy', 'EuRoC MH_03_medium', 'EuRoC MH_04_difficult',
                       'EuRoC MH_05_difficult', 'EuRoC V1_01_easy', 'EuRoC V1_02_medium', 'EuRoC V1_03_difficult',
                       'EuRoC V2_01_easy', 'EuRoC V2_02_medium', 'EuRoC V2_03_difficult']
-        tum_sets = ['rgbd_dataset_freiburg1_360', 'rgbd_dataset_frieburg1_rpy', 'rgbd_dataset_frieburg1_xyz',
-                    'rgbd_dataset_frieburg2_desk', 'rgbd_dataset_frieburg2_rpy', 'rgbd_dataset_frieburg2_xyz',
-                    'rgbd_dataset_frieburg3_structure_texture_far', 'rgbd_dataset_frieburg3_walking_xyz']
+        tum_sets = ['TUM rgbd_dataset_freiburg1_360', 'TUM rgbd_dataset_frieburg1_rpy',
+                    'TUM rgbd_dataset_frieburg1_xyz', 'TUM rgbd_dataset_frieburg2_desk',
+                    'TUM rgbd_dataset_frieburg2_rpy', 'TUM rgbd_dataset_frieburg2_xyz',
+                    'TUM rgbd_dataset_frieburg3_structure_texture_far', 'TUM rgbd_dataset_frieburg3_walking_xyz']
         kitti_sets = ['KITTI trajectory {}'.format(sequence_num) for sequence_num in range(11)]
 
         # --------- MONOCULAR -----------
@@ -526,6 +527,9 @@ class GeneratedPredictRealWorldExperiment(arvet.batch_analysis.experiment.Experi
                 scores = [s[column_idx] for s in group_scores]
                 df_data[error_name] += scores
 
+        if len(df_data['source']) <= 0:
+            logging.getLogger(__name__).info("Error, data collected, cannot plot.")
+            return
         dataframe = pd.DataFrame(data=df_data)
 
         # Boxplot each of the errors

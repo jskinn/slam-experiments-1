@@ -252,7 +252,7 @@ class PredictSourceFromErrorExperiment(arvet.batch_analysis.experiment.Experimen
                 experiment_id=self.identifier,
                 num_cpus=2,
                 memory_requirements='32GB',
-                expected_duration='48:00:00'
+                expected_duration='336:00:00'
             )
 
     def import_system(self, name: str, system: arvet.core.system.VisionSystem,
@@ -416,7 +416,7 @@ class PredictSourceFromErrorExperiment(arvet.batch_analysis.experiment.Experimen
                 random_state.choice(euroc_sets),
                 random_state.choice(tum_sets),
                 random_state.choice(kitti_sets)
-            } for _ in range(10)],
+            } for _ in range(5)],
             output_folder=os.path.join(type(self).get_output_folder(), 'ORBSLAM monocular', 'one from each domain'),
             db_client=db_client
         )
@@ -438,7 +438,7 @@ class PredictSourceFromErrorExperiment(arvet.batch_analysis.experiment.Experimen
                     random_state.choice(euroc_sets),
                     random_state.choice(kitti_sets),
                     random_state.choice(kitti_sets)
-                } for _ in range(10)],
+                } for _ in range(5)],
                 output_folder=os.path.join(type(self).get_output_folder(), system_name, 'one from each domain'),
                 db_client=db_client
             )
@@ -458,7 +458,7 @@ class PredictSourceFromErrorExperiment(arvet.batch_analysis.experiment.Experimen
                 random_state.choice(tum_sets),
                 random_state.choice(tum_sets),
                 random_state.choice(tum_sets)
-            } for _ in range(10)],
+            } for _ in range(5)],
             output_folder=os.path.join(type(self).get_output_folder(), 'ORBSLAM rgbd'),
             db_client=db_client
         )
