@@ -37,13 +37,23 @@ class TestBaseGeneratedDataExperiment(entity_test.EntityContract, unittest.TestC
                             'min_quality': bson.ObjectId()
                         }
                     }
+                ),
+                'KITTI trajectory 2': tg.TrajectoryGroup(
+                    name='KITTI trajectory 2',
+                    reference_id=bson.ObjectId(),
+                    mappings=[('Block World', {'location': [12, -63.2, 291.1], 'rotation': [-22, -214, 121]})],
+                    baseline_configuration={'test': bson.ObjectId()},
+                    controller_id=bson.ObjectId(),
+                    generated_datasets={
+                        'Block World': {
+                            'max_quality': bson.ObjectId(),
+                            'min_quality': bson.ObjectId()
+                        }
+                    }
                 )
             },
             'benchmarks': {
-                'benchmark_rpe': bson.ObjectId(),
-                'benchmark_ate': bson.ObjectId(),
-                'benchmark_trajectory_drift': bson.ObjectId(),
-                'benchmark_tracking': bson.ObjectId(),
+                'Estimate Errors': bson.ObjectId()
             },
             'trial_map': {
                 bson.ObjectId(): {
@@ -152,7 +162,7 @@ class TestBaseGeneratedDataExperiment(entity_test.EntityContract, unittest.TestC
         mock_add_unique.return_value = bson.ObjectId()
         subject = self.make_instance()
         self.assertFalse(mock_add_unique.called)
-        subject.import_benchmark('benchmark_rpe', mock.Mock(), self.create_mock_db_client())
+        subject.import_benchmark('Estimate Errors', mock.Mock(), self.create_mock_db_client())
         self.assertFalse(mock_add_unique.called)
 
     def test_import_dataset_schedules_task(self):
@@ -201,3 +211,30 @@ class TestBaseGeneratedDataExperiment(entity_test.EntityContract, unittest.TestC
         self.assertEqual('TestDataset', trajectory_group.name)
         self.assertEqual(mock_task.result, trajectory_group.reference_dataset)
         self.assertEqual([('First', {'location': [1, 2, 3], 'rotation': [4, 5, 6]})], trajectory_group.mappings)
+
+    def test_split_datasets_validation_and_training_does_not_return_same_result_more_than_once(self):
+        mock_db_client = self.create_mock_db_client()
+        subject = self.make_instance(trial_map={})
+
+        # Create results for each system, dataset, and benchmark
+        for system_id in subject.systems.values():
+            for trajectory_group in subject.trajectory_groups.values():
+                for dataset_id in trajectory_group.get_all_dataset_ids():
+                    subject.store_trial_results(system_id, dataset_id, [bson.ObjectId() for _ in range(10)],
+                                                mock_db_client)
+                    for benchmark_id in subject.benchmarks.values():
+                        subject.store_benchmark_result(system_id, dataset_id, benchmark_id, bson.ObjectId())
+
+        for system_id in subject.systems.values():
+            output = subject.split_datasets_validation_and_training(system_id, {'KITTI trajectory 1'})
+            validation_real_world_datasets, training_real_world_datasets, virtual_datasets_by_quality = output
+
+            returned_datasets = set(validation_real_world_datasets)
+            self.assertEqual(0, len(returned_datasets & training_real_world_datasets))
+            returned_datasets |= training_real_world_datasets
+            for validation_virtual_datasets, training_virtual_datasets in virtual_datasets_by_quality.values():
+                self.assertEqual(0, len(returned_datasets & validation_virtual_datasets))
+                returned_datasets |= validation_virtual_datasets
+                self.assertEqual(0, len(returned_datasets & training_virtual_datasets))
+                returned_datasets |= training_virtual_datasets
+

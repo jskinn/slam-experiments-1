@@ -433,12 +433,10 @@ class GeneratedPredictRealWorldExperiment(arvet.batch_analysis.experiment.Experi
             # In the first experiment, we want to to pick a validation dataset from each group to validate on.
             self.analyse_validation_groups(
                 system_name=system_name,
-                validation_sets=[{
-                    random_state.choice(euroc_sets),
-                    random_state.choice(euroc_sets),
-                    random_state.choice(kitti_sets),
-                    random_state.choice(kitti_sets)
-                } for _ in range(10)],
+                validation_sets=[
+                    set(random_state.choice(euroc_sets, 2, replace=False)) |
+                    set(random_state.choice(kitti_sets, 2, replace=False))
+                    for _ in range(10)],
                 output_folder=os.path.join(type(self).get_output_folder(), system_name, 'one from each domain'),
                 db_client=db_client
             )
@@ -454,11 +452,9 @@ class GeneratedPredictRealWorldExperiment(arvet.batch_analysis.experiment.Experi
         # For RGB-D, we only have data from one domain (TUM) so we test excluding parts of that.
         self.analyse_validation_groups(
             system_name='ORBSLAM2 rgbd',
-            validation_sets=[{
-                random_state.choice(tum_sets),
-                random_state.choice(tum_sets),
-                random_state.choice(tum_sets)
-            } for _ in range(10)],
+            validation_sets=[
+                set(random_state.choice(tum_sets, 3, replace=False))
+                for _ in range(10)],
             output_folder=os.path.join(type(self).get_output_folder(), 'ORBSLAM rgbd'),
             db_client=db_client
         )
@@ -467,11 +463,12 @@ class GeneratedPredictRealWorldExperiment(arvet.batch_analysis.experiment.Experi
                                   output_folder: str, db_client: arvet.database.client.DatabaseClient):
         import pandas as pd
         import matplotlib.pyplot as pyplot
+        from sklearn.metrics import precision_recall_curve
 
         if system_name not in self.systems:
             logging.getLogger(__name__).info("Cannot find system \"{0}\"".format(system_name))
             return
-        group_scores = {'Real World': []}
+        group_predictions = {}
         for validation_set_names in validation_sets:
             logging.getLogger(__name__).info("Predicting errors for {0} ...".format(system_name))
             output = self.split_datasets_validation_and_training(self.systems[system_name], validation_set_names)
@@ -494,104 +491,125 @@ class GeneratedPredictRealWorldExperiment(arvet.batch_analysis.experiment.Experi
                 virtual_results_by_quality=virtual_datasets_by_quality,
                 db_client=db_client
             )
-            group_scores['Real World'].append(rw_errors)
+            if 'Real World' not in group_predictions:
+                group_predictions['Real World'] = rw_errors
+            else:
+                for idx in range(len(group_predictions['Real World'])):
+                    group_predictions['Real World'][idx] += rw_errors[idx]
+
             for group_name, errors in virtual_data_errors.items():
-                if group_name not in group_scores:
-                    group_scores[group_name] = [errors]
+                if group_name not in group_predictions:
+                    group_predictions[group_name] = errors
                 else:
-                    group_scores[group_name].append(errors)
-
-        error_names = [
-            'x error',
-            'y error',
-            'z error',
-            'translational error length',
-            'translational error direction',
-            'rotational error',
-            'x noise',
-            'y noise',
-            'z noise',
-            'translational noise length',
-            'translational noise direction',
-            'rotational noise',
-            'tracking'
-        ]
-
-        # Build the pandas dataframe
-        df_data = {'source': []}
-        for group_name, group_scores in group_scores.items():
-            df_data['source'] += [group_name for _ in range(len(group_scores))]
-            for column_idx, error_name in enumerate(error_names):
-                if error_name not in df_data:
-                    df_data[error_name] = []
-                scores = [s[column_idx] for s in group_scores]
-                df_data[error_name] += scores
-
-        if len(df_data['source']) <= 0:
-            logging.getLogger(__name__).info("Error, no data collected, cannot plot.")
-            return
-        dataframe = pd.DataFrame(data=df_data)
+                    for idx in range(len(group_predictions[group_name])):
+                        group_predictions[group_name][idx] += errors[idx]
 
         # Boxplot each of the errors
         os.makedirs(output_folder, exist_ok=True)
 
         # First, the errors
         title = "{0} error prediction scores".format(system_name)
-        figure, axes = pyplot.subplots(1, 6, figsize=(70, 10), dpi=80)
-        for idx, error_name in enumerate([
-            'x error',
-            'y error',
-            'z error',
-            'translational error length',
-            'translational error direction',
-            'rotational error'
-        ]):
-            axes[idx].set_title(error_name)
-            axes[idx].tick_params(axis='x', rotation=90)
-            dataframe.boxplot(column=error_name, by='source', ax=axes[idx])
-            axes[idx].set_xlabel('')
-            axes[idx].set_ylabel('Mean Squared Error')
+        figure, axes = pyplot.subplots(3, 2, figsize=(20, 40), dpi=80)
+        for idx, error_name, units in [
+            (0, 'forward error', 'm'),
+            (1, 'sideways error', 'm'),
+            (2, 'vertical error', 'm'),
+            (3, 'translational error length', 'm'),
+            (5, 'rotational error', 'radians')
+        ]:
+            # Build a pandas dataframe for this particular error
+            df_data = {'source': [], 'errors': []}
+            for group_name, group_predict_pairs in group_predictions.items():
+                if len(group_predict_pairs[idx]) <= 0:
+                    continue
+                error_data = np.array(group_predict_pairs[idx])
+                # Calculate absolute error
+                df_data['source'] += [group_name for _ in range(error_data.shape[0])]
+                df_data['errors'] += np.abs(error_data[:, 0] - error_data[:, 1]).tolist()
+            if len(df_data['errors']) <= 0:
+                continue
+            dataframe = pd.DataFrame(data=df_data)
 
+            # Assuming we got some amount of data, boxplot it
+            ax = axes[idx // 2, idx % 2]
+            dataframe.boxplot(column='errors', by='source', ax=ax)
+            ax.set_title(error_name)
+            ax.tick_params(axis='x', rotation=90)
+            ax.set_ylim(bottom=0)
+            ax.set_xlabel('')
+            ax.set_ylabel('Absolute Error ({0})'.format(units))
+
+        figure.delaxes(axes[2, 0])  # Get rid of the lower-left axis
         figure.suptitle(title)
         pyplot.tight_layout()
-        pyplot.subplots_adjust(top=0.90, right=0.99)
+        pyplot.subplots_adjust(top=0.95, right=0.99)
         figure.savefig(os.path.join(output_folder, title + '.png'))
+        figure.savefig(os.path.join(output_folder, title + '.svg'))
         pyplot.close(figure)
 
         # Then the noise
         title = "{0} noise prediction scores".format(system_name)
-        figure, axes = pyplot.subplots(1, 6, figsize=(70, 10), dpi=80)
-        for idx, error_name in enumerate([
-            'x noise',
-            'y noise',
-            'z noise',
-            'translational noise length',
-            'translational noise direction',
-            'rotational noise'
-        ]):
-            axes[idx].set_title(error_name)
-            axes[idx].tick_params(axis='x', rotation=90)
-            dataframe.boxplot(column=error_name, by='source', ax=axes[idx])
-            axes[idx].set_xlabel('')
-            axes[idx].set_ylabel('Mean Squared Error')
+        figure, axes = pyplot.subplots(3, 2, figsize=(20, 40), dpi=80)
+        for idx, error_name, units in [
+            (6, 'forward noise', 'm'),
+            (7, 'sideways noise', 'm'),
+            (8, 'vertical noise', 'm'),
+            (9, 'translational noise length', 'm'),
+            (11, 'rotational noise', 'rad'),
+        ]:
+            # Build a pandas dataframe for this particular error
+            df_data = {'source': [], 'errors': []}
+            for group_name, group_predict_pairs in group_predictions.items():
+                if len(group_predict_pairs[idx]) <= 0:
+                    continue
+                error_data = np.array(group_predict_pairs[idx])    # Offset for the noise columns
+                # Calculate absolute error
+                df_data['source'] += [group_name for _ in range(error_data.shape[0])]
+                df_data['errors'] += np.abs(error_data[:, 0] - error_data[:, 1]).tolist()
+            if len(df_data['errors']) <= 0:
+                continue
+            dataframe = pd.DataFrame(data=df_data)
+
+            # Assuming we got some amount of data, boxplot it
+            ax = axes[(idx - 6) // 2, (idx - 6) % 2]
+            dataframe.boxplot(column='errors', by='source', ax=ax)
+            ax.set_title(error_name)
+            ax.tick_params(axis='x', rotation=90)
+            ax.set_xlabel('')
+            ax.set_ylim(bottom=0)
+            ax.set_ylabel('Absolute Error ({0})'.format(units))
+
+        figure.delaxes(axes[2, 0])  # Get rid of the lower-left axis
         figure.suptitle(title)
         pyplot.tight_layout()
-        pyplot.subplots_adjust(top=0.90, right=0.99)
+        pyplot.subplots_adjust(top=0.95, right=0.99)
         figure.savefig(os.path.join(output_folder, title + '.png'))
+        figure.savefig(os.path.join(output_folder, title + '.svg'))
         pyplot.close(figure)
 
         # Last the tracking
-        title = "{0} tracking F1 score".format(system_name)
+        title = "{0} tracking precision recall".format(system_name)
         figure, ax = pyplot.subplots(1, 1, figsize=(14, 10), dpi=80)
-        dataframe.boxplot(column='tracking', by='source', ax=ax)
+
+        for group_name, group_predict_pairs in group_predictions.items():
+            if len(group_predict_pairs[12]) <= 0:
+                continue
+            error_data = np.array(group_predict_pairs[12])
+            precision, recall, _ = precision_recall_curve(error_data[:, 1], error_data[:, 0])
+            lines = ax.step(recall, precision, where='post', label=group_name, alpha=0.2)
+            ax.fill_between(recall, precision, step='post', alpha=0.2, color=lines[0].get_color())
+
         figure.suptitle(title)
-        ax.tick_params(axis='x', rotation=90)
-        ax.set_xlabel('')
-        ax.set_ylabel('F1 Score')
+        ax.set_xlim((0, 1))
+        ax.set_ylim((0, 1.05))
+        ax.set_xlabel('Recall')
+        ax.set_ylabel('Precision')
+        ax.legend()
 
         pyplot.tight_layout()
-        pyplot.subplots_adjust(top=0.90, right=0.99)
+        pyplot.subplots_adjust(top=0.95, right=0.99)
         figure.savefig(os.path.join(output_folder, title + '.png'))
+        figure.savefig(os.path.join(output_folder, title + '.svg'))
         pyplot.close(figure)
 
     def split_datasets_validation_and_training(self, system_id: bson.ObjectId, validation_datasets: typing.Set[str]) \
@@ -626,8 +644,7 @@ class GeneratedPredictRealWorldExperiment(arvet.batch_analysis.experiment.Experi
                     if quality_name not in virtual_datasets_by_quality:
                         virtual_datasets_by_quality[quality_name] = (set(), set())
 
-                    result_id = self.get_benchmark_result(system_id, trajectory_group.reference_dataset,
-                                                          self.benchmarks['Estimate Errors'])
+                    result_id = self.get_benchmark_result(system_id, dataset_id, self.benchmarks['Estimate Errors'])
                     if result_id is not None:
                         if trajectory_group.name in validation_datasets:
                             virtual_datasets_by_quality[quality_name][0].add(result_id)
@@ -763,7 +780,8 @@ def predict_real_and_virtual_errors(validation_results: typing.Iterable[bson.Obj
                                                           typing.Set[bson.ObjectId]]
                                     ],
                                     db_client: arvet.database.client.DatabaseClient) \
-        -> typing.Tuple[typing.List[float], typing.Mapping[str, typing.List[float]]]:
+        -> typing.Tuple[typing.List[typing.List[typing.Tuple[float, float]]],
+                        typing.Mapping[str, typing.List[typing.List[typing.Tuple[float, float]]]]]:
 
     # Load the validation data
     val_x, val_y = collect_errors_and_input(validation_results, db_client)
@@ -819,13 +837,13 @@ def predict_real_and_virtual_errors(validation_results: typing.Iterable[bson.Obj
     return real_world_scores, errors_by_group
 
 
-def predict_errors(data, target_data):
+def predict_errors(data, target_data) -> typing.List[typing.List[typing.Tuple[float, float]]]:
     """
     Try and predict each dimension of the output data separately, from the same input.
     Returns a list that is the width of the output,
     :param data: a tuple of n,i training samples with n,j true outputs
     :param target_data: a tuple of m,i validation samples with m,j true outputs
-    :return: A list of length j with the accuracy of predicting each column of the output.
+    :return: A list of length j,m,2, consisting of m pairs of predicted/true values for each of j errors
     """
     scores = []
     train_x, train_y = data
@@ -841,7 +859,7 @@ def predict_errors(data, target_data):
     return scores
 
 
-def predict_regression(data, target_data) -> float:
+def predict_regression(data, target_data) -> typing.List[typing.Tuple[float, float]]:
     """
     Train on the first set of data, and evaluate on the second set of data.
     Returns the mean squared error on the target data, which is not used during training.
@@ -853,7 +871,6 @@ def predict_regression(data, target_data) -> float:
     from sklearn.svm import SVR
     from sklearn.preprocessing import Imputer, StandardScaler
     from sklearn.pipeline import Pipeline
-    from sklearn.metrics import mean_squared_error
 
     train_x, train_y = data
     val_x, val_y = target_data
@@ -867,7 +884,7 @@ def predict_regression(data, target_data) -> float:
     val_y = val_y[valid_indices]
 
     if len(train_y) <= 0 or len(val_y) <= 0:
-        return np.nan
+        return []
 
     # Build the data processing pipeline, including preprocessing for missing values
     model = Pipeline([
@@ -877,24 +894,23 @@ def predict_regression(data, target_data) -> float:
     ])
 
     # Fit and evaluate the regressor
-    model.fit(train_x[:100, :], train_y[:100])
-    predict_y = model.predict(val_x[:100, :])
-    return mean_squared_error(val_y[:100], predict_y)
+    model.fit(train_x, train_y)
+    predict_y = model.predict(val_x)
+    return list(zip(predict_y, val_y))
 
 
-def predict_classification(data, target_data) -> float:
+def predict_classification(data, target_data) -> typing.List[typing.Tuple[float, float]]:
     """
     Train on the first set of data, and evaluate on the second set of data.
     Returns the mean squared error on the target data, which is not used during training.
     This performs classificaion, use when the
     :param data:
     :param target_data:
-    :return:
+    :return: A list of pairs of predicted and true values
     """
     from sklearn.svm import SVC
     from sklearn.preprocessing import Imputer, StandardScaler
     from sklearn.pipeline import Pipeline
-    from sklearn.metrics import f1_score
 
     train_x, train_y = data
     val_x, val_y = target_data
@@ -908,7 +924,7 @@ def predict_classification(data, target_data) -> float:
     val_y = np.asarray(val_y[valid_indices], dtype=np.int)
 
     if len(train_y) <= 0 or len(val_y) <= 0 or np.all(train_y == train_y[0]) or np.all(val_y == val_y[0]):
-        return np.nan
+        return []
 
     # Build the data processing pipeline, including preprocessing for missing values
     model = Pipeline([
@@ -920,4 +936,4 @@ def predict_classification(data, target_data) -> float:
     # Fit and evaluate the regressor
     model.fit(train_x, train_y)
     predict_y = model.predict(val_x)
-    return f1_score(val_y, predict_y)
+    return list(zip(predict_y, val_y))
