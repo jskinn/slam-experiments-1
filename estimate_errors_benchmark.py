@@ -119,6 +119,9 @@ class EstimateErrorsBenchmark(arvet.core.benchmark.Benchmark):
                     gt_motion.location[1],
                     gt_motion.location[2],
                     np.linalg.norm(gt_motion.location),
+                    gt_motion.euler[0],
+                    gt_motion.euler[1],
+                    gt_motion.euler[2],
                     tf.quat_angle(gt_motion.rotation_quat(w_first=True))
                 ))
 

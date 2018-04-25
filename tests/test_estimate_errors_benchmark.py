@@ -209,7 +209,7 @@ class TestEstimateErrorsBenchmark(arvet.database.tests.test_entity.EntityContrac
         if isinstance(result, arvet.core.benchmark.FailedBenchmark):
             print(result.reason)
 
-        self.assertEqual((len(self.trial_results) * (len(self.trial_results[0].ground_truth_trajectory) - 1), 20),
+        self.assertEqual((len(self.trial_results) * (len(self.trial_results[0].ground_truth_trajectory) - 1), 23),
                          result.observations.shape)
 
     def test_benchmark_results_estimates_no_error_for_identical_trajectory(self):
