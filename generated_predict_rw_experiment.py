@@ -399,6 +399,7 @@ class GeneratedPredictRealWorldExperiment(arvet.batch_analysis.experiment.Experi
         :return:
         """
         random_state = np.random.RandomState(20142)
+        results_cache = {}
         euroc_sets = ['EuRoC MH_01_easy', 'EuRoC MH_02_easy', 'EuRoC MH_03_medium', 'EuRoC MH_04_difficult',
                       'EuRoC MH_05_difficult', 'EuRoC V1_01_easy', 'EuRoC V1_02_medium', 'EuRoC V1_03_difficult',
                       'EuRoC V2_01_easy', 'EuRoC V2_02_medium', 'EuRoC V2_03_difficult']
@@ -418,14 +419,16 @@ class GeneratedPredictRealWorldExperiment(arvet.batch_analysis.experiment.Experi
                 random_state.choice(kitti_sets)
             } for _ in range(10)],
             output_folder=os.path.join(type(self).get_output_folder(), 'ORBSLAM monocular', 'one from each domain'),
-            db_client=db_client
+            db_client=db_client,
+            results_cache=results_cache
         )
         # In the second set, we want to test cross domain evaluation by excluding entire datasets as validation
         self.analyse_validation_groups(
             system_name='ORBSLAM2 monocular',
             validation_sets=[set(euroc_sets), set(tum_sets), set(kitti_sets)],
             output_folder=os.path.join(type(self).get_output_folder(), 'ORBSLAM monocular', 'cross domain'),
-            db_client=db_client
+            db_client=db_client,
+            results_cache=results_cache
         )
 
         # --------- STEREO -----------
@@ -438,14 +441,16 @@ class GeneratedPredictRealWorldExperiment(arvet.batch_analysis.experiment.Experi
                     set(random_state.choice(kitti_sets, 2, replace=False))
                     for _ in range(10)],
                 output_folder=os.path.join(type(self).get_output_folder(), system_name, 'one from each domain'),
-                db_client=db_client
+                db_client=db_client,
+                results_cache=results_cache
             )
             # In the second set, we want to test cross domain evaluation by excluding entire datasets as validation
             self.analyse_validation_groups(
                 system_name=system_name,
                 validation_sets=[set(euroc_sets), set(kitti_sets)],
                 output_folder=os.path.join(type(self).get_output_folder(), system_name, 'cross domain'),
-                db_client=db_client
+                db_client=db_client,
+                results_cache=results_cache
             )
 
         # --------- RGB-D -----------
@@ -456,11 +461,13 @@ class GeneratedPredictRealWorldExperiment(arvet.batch_analysis.experiment.Experi
                 set(random_state.choice(tum_sets, 3, replace=False))
                 for _ in range(10)],
             output_folder=os.path.join(type(self).get_output_folder(), 'ORBSLAM rgbd'),
-            db_client=db_client
+            db_client=db_client,
+            results_cache=results_cache
         )
 
     def analyse_validation_groups(self, system_name: str, validation_sets: typing.Iterable[typing.Set[str]],
-                                  output_folder: str, db_client: arvet.database.client.DatabaseClient):
+                                  output_folder: str, db_client: arvet.database.client.DatabaseClient,
+                                  results_cache: dict):
         import pandas as pd
         import matplotlib.pyplot as pyplot
         from sklearn.metrics import precision_recall_curve
@@ -489,7 +496,8 @@ class GeneratedPredictRealWorldExperiment(arvet.batch_analysis.experiment.Experi
                 validation_results=validation_real_world_datasets,
                 real_world_results=training_real_world_datasets,
                 virtual_results_by_quality=virtual_datasets_by_quality,
-                db_client=db_client
+                db_client=db_client,
+                results_cache=results_cache
             )
             if 'Real World' not in group_predictions:
                 group_predictions['Real World'] = rw_errors
@@ -755,21 +763,29 @@ def partition_by_name(group: typing.Mapping[str, bson.ObjectId], names_to_includ
 
 
 def collect_errors_and_input(result_ids: typing.Iterable[bson.ObjectId],
-                             db_client: arvet.database.client.DatabaseClient):
+                             db_client: arvet.database.client.DatabaseClient,
+                             results_cache: dict):
     """
     Collect together error observations from a given set of result ids
     :param result_ids:
     :param db_client:
+    :param results_cache:
     :return:
     """
-    results = dh.load_many_objects(db_client, db_client.results_collection, result_ids)
+    # Add the results we don't already have to the results cache
+    result_ids = set(result_ids)
+    results = dh.load_many_objects(db_client, db_client.results_collection, result_ids - set(results_cache.keys()))
+    for result in results:
+        results_cache[result.identifier] = result.observations
+
+    # Then pull the errors from the cache
     collected_errors = []
     collected_characteristics = []
-    for result in results:
+    for result_id in result_ids:
         # the first 13 values in an estimate error observation are errors,
         # The remainder are the features we're going to use to predict
-        collected_errors += result.observations[:, :13].tolist()
-        collected_characteristics += result.observations[:, 13:].tolist()
+        collected_errors += results_cache[result_id][:, :13].tolist()
+        collected_characteristics += results_cache[result_id][:, 13:].tolist()
     return np.array(collected_characteristics), np.array(collected_errors)
 
 
@@ -779,18 +795,19 @@ def predict_real_and_virtual_errors(validation_results: typing.Iterable[bson.Obj
                                         str, typing.Tuple[typing.Set[bson.ObjectId],
                                                           typing.Set[bson.ObjectId]]
                                     ],
-                                    db_client: arvet.database.client.DatabaseClient) \
+                                    db_client: arvet.database.client.DatabaseClient,
+                                    results_cache: dict) \
         -> typing.Tuple[typing.List[typing.List[typing.Tuple[float, float]]],
                         typing.Mapping[str, typing.List[typing.List[typing.Tuple[float, float]]]]]:
 
     # Load the validation data
-    val_x, val_y = collect_errors_and_input(validation_results, db_client)
+    val_x, val_y = collect_errors_and_input(validation_results, db_client, results_cache)
     if len(val_x) <= 0 or len(val_y) <= 0:
         logging.getLogger(__name__).info("   No validation data available")
         return [], {}
 
     # Predict the error using real world data
-    train_x, train_y = collect_errors_and_input(real_world_results, db_client)
+    train_x, train_y = collect_errors_and_input(real_world_results, db_client, results_cache)
     if len(train_x) <= 0 or len(train_y) <= 0:
         logging.getLogger(__name__).info("   No real world data available")
         real_world_scores = []
@@ -812,7 +829,7 @@ def predict_real_and_virtual_errors(validation_results: typing.Iterable[bson.Obj
 
         # First, all data
         train_x, train_y = collect_errors_and_input(validation_virtual_datasets |
-                                                    training_virtual_datasets, db_client)
+                                                    training_virtual_datasets, db_client, results_cache)
         if len(train_x) > 0 and len(train_y) > 0:
             errors_by_group['{0} all data'.format(quality_name)] = predict_errors(
                 data=(train_x, train_y),
@@ -820,7 +837,7 @@ def predict_real_and_virtual_errors(validation_results: typing.Iterable[bson.Obj
             )
 
         # Missing same trajectory as validation set
-        train_x, train_y = collect_errors_and_input(training_virtual_datasets, db_client)
+        train_x, train_y = collect_errors_and_input(training_virtual_datasets, db_client, results_cache)
         if len(train_x) > 0 and len(train_y) > 0:
             errors_by_group['{0} no validation trajectory'.format(quality_name)] = predict_errors(
                 data=(train_x, train_y),
@@ -828,7 +845,7 @@ def predict_real_and_virtual_errors(validation_results: typing.Iterable[bson.Obj
             )
 
         # Only using data with the same trajectory as the validation set
-        train_x, train_y = collect_errors_and_input(validation_virtual_datasets, db_client)
+        train_x, train_y = collect_errors_and_input(validation_virtual_datasets, db_client, results_cache)
         if len(train_x) > 0 and len(train_y) > 0:
             errors_by_group['{0} only validation trajectory'.format(quality_name)] = predict_errors(
                 data=(train_x, train_y),
@@ -868,9 +885,10 @@ def predict_regression(data, target_data) -> typing.List[typing.Tuple[float, flo
     :param target_data:
     :return:
     """
-    from sklearn.svm import SVR
+    # from sklearn.svm import SVR
     from sklearn.preprocessing import Imputer, StandardScaler
     from sklearn.pipeline import Pipeline
+    from sklearn.linear_model import SGDRegressor
 
     train_x, train_y = data
     val_x, val_y = target_data
@@ -890,7 +908,8 @@ def predict_regression(data, target_data) -> typing.List[typing.Tuple[float, flo
     model = Pipeline([
         ('imputer', Imputer(missing_values='NaN', strategy='mean', axis=0)),
         ('scaler', StandardScaler()),
-        ('regressor', SVR(kernel='rbf'))
+        # ('regressor', SVR(kernel='rbf'))
+        ('regressor', SGDRegressor(loss='huber', tol=0.001, max_iter=1000, shuffle=True))
     ])
 
     # Fit and evaluate the regressor
@@ -908,7 +927,8 @@ def predict_classification(data, target_data) -> typing.List[typing.Tuple[float,
     :param target_data:
     :return: A list of pairs of predicted and true values
     """
-    from sklearn.svm import SVC
+    # from sklearn.svm import SVC
+    from sklearn.linear_model import SGDClassifier
     from sklearn.preprocessing import Imputer, StandardScaler
     from sklearn.pipeline import Pipeline
 
@@ -930,7 +950,8 @@ def predict_classification(data, target_data) -> typing.List[typing.Tuple[float,
     model = Pipeline([
         ('imputer', Imputer(missing_values='NaN', strategy='mean', axis=0)),
         ('scaler', StandardScaler()),
-        ('classifier', SVC(kernel='rbf'))
+        # ('classifier', SVC(kernel='rbf'))
+        ('classifier', SGDClassifier(loss='hinge', tol=0.001, max_iter=1000, shuffle=True))
     ])
 
     # Fit and evaluate the regressor
