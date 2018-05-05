@@ -1,6 +1,7 @@
 import unittest
 import unittest.mock as mock
 import time
+import os
 import numpy as np
 import bson
 import arvet.util.dict_utils as du
@@ -405,6 +406,47 @@ class TestPerformAnalysis(unittest.TestCase):
         self.assertEqual(13, results_cache[result_id][0, 13])
         self.assertTrue(np.all(results_cache[result_id] >= 0))
 
+    def test_create_error_plots(self):
+        output_folder = 'temp'
+        system_name = 'test_system'
+        group_names = [
+            'Real world',
+            'Max quality all data',
+            'Max quality no validation trajectory',
+            'Max quality only validation trajectory',
+            'Min quality all data',
+            'Min quality no validation trajectory',
+            'Min quality only validation trajectory'
+        ]
+
+        group_predictions = {}
+        for group_name in group_names:
+            group_predictions[group_name] = []
+            for _ in range(12):
+                values = np.random.exponential(1, size=1000)
+                estimates = values + np.random.choice((-1, 1), size=1000) * np.random.exponential(0.1, size=1000)
+                group_predictions[group_name].append(
+                    [(values[obs_idx], estimates[obs_idx]) for obs_idx in range(1000)]
+                )
+
+        os.makedirs(output_folder, exist_ok=True)
+        gprwe.create_errors_plots(
+            indexes_and_names=[
+                (0, '{0} forward error'.format(system_name), 'm'),
+                (1, '{0} sideways error'.format(system_name), 'm'),
+                (2, '{0} vertical error'.format(system_name), 'm'),
+                (3, '{0} translational error length'.format(system_name), 'm'),
+                (5, '{0} rotational error'.format(system_name), 'radians'),
+                (6, '{0} forward noise'.format(system_name), 'm'),
+                (7, '{0} sideways noise'.format(system_name), 'm'),
+                (8, '{0} vertical noise'.format(system_name), 'm'),
+                (9, '{0} translational noise length'.format(system_name), 'm'),
+                (11, '{0} rotational noise'.format(system_name), 'rad')
+            ],
+            group_predictions=group_predictions,
+            output_folder=output_folder
+        )
+
 
 def create_all_errors(predictors):
     data_len = predictors.shape[0]
@@ -437,9 +479,8 @@ def create_trans_error(predictors):
     ))
     return np.linalg.norm(error, axis=1)
 
-def create_test_predictors():
+def create_test_predictors(data_len: int = 10000):
     random = np.random.RandomState()
-    data_len = 10000
     predictors = np.hstack((
         np.asarray(random.randint(10, 600, size=(data_len, 2)), dtype=np.float32),
         random.choice((-1, 1), size=(data_len, 3)) * random.exponential(1, size=(data_len, 3)),

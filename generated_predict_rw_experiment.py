@@ -17,7 +17,7 @@ import arvet.batch_analysis.task_manager
 import arvet.simulation.unrealcv.unrealcv_simulator as uecv_sim
 
 import arvet_slam.systems.slam.orbslam2 as orbslam2
-import arvet_slam.systems.visual_odometry.libviso2.libviso2 as libviso2
+#import arvet_slam.systems.visual_odometry.libviso2.libviso2 as libviso2
 
 import data_helpers
 import trajectory_group as tg
@@ -186,11 +186,11 @@ class GeneratedPredictRealWorldExperiment(arvet.batch_analysis.experiment.Experi
 
         # --------- SYSTEMS -----------
         # LibVisO2
-        self.import_system(
-            name='LibVisO',
-            system=libviso2.LibVisOSystem(),
-            db_client=db_client
-        )
+        #self.import_system(
+        #    name='LibVisO',
+        #    system=libviso2.LibVisOSystem(),
+        #    db_client=db_client
+        #)
 
         # ORBSLAM2 - Create 3 variants; stereo, mono, and rgbd
         # These datasets don't have
@@ -468,10 +468,6 @@ class GeneratedPredictRealWorldExperiment(arvet.batch_analysis.experiment.Experi
     def analyse_validation_groups(self, system_name: str, validation_sets: typing.Iterable[typing.Set[str]],
                                   output_folder: str, db_client: arvet.database.client.DatabaseClient,
                                   results_cache: dict):
-        import pandas as pd
-        import matplotlib.pyplot as pyplot
-        from sklearn.metrics import precision_recall_curve
-
         if system_name not in self.systems:
             logging.getLogger(__name__).info("Cannot find system \"{0}\"".format(system_name))
             return
@@ -512,113 +508,24 @@ class GeneratedPredictRealWorldExperiment(arvet.batch_analysis.experiment.Experi
                     for idx in range(len(group_predictions[group_name])):
                         group_predictions[group_name][idx] += errors[idx]
 
-        # Boxplot each of the errors
+        # plot the errors
         os.makedirs(output_folder, exist_ok=True)
-
-        # First, the errors
-        title = "{0} error prediction scores".format(system_name)
-        figure, axes = pyplot.subplots(3, 2, figsize=(20, 40), dpi=80)
-        for idx, error_name, units in [
-            (0, 'forward error', 'm'),
-            (1, 'sideways error', 'm'),
-            (2, 'vertical error', 'm'),
-            (3, 'translational error length', 'm'),
-            (5, 'rotational error', 'radians')
-        ]:
-            # Build a pandas dataframe for this particular error
-            df_data = {'source': [], 'errors': []}
-            for group_name, group_predict_pairs in group_predictions.items():
-                if len(group_predict_pairs[idx]) <= 0:
-                    continue
-                error_data = np.array(group_predict_pairs[idx])
-                # Calculate absolute error
-                df_data['source'] += [group_name for _ in range(error_data.shape[0])]
-                df_data['errors'] += np.abs(error_data[:, 0] - error_data[:, 1]).tolist()
-            if len(df_data['errors']) <= 0:
-                continue
-            dataframe = pd.DataFrame(data=df_data)
-
-            # Assuming we got some amount of data, boxplot it
-            ax = axes[idx // 2, idx % 2]
-            dataframe.boxplot(column='errors', by='source', ax=ax)
-            ax.set_title(error_name)
-            ax.tick_params(axis='x', rotation=90)
-            ax.set_ylim(bottom=0)
-            ax.set_xlabel('')
-            ax.set_ylabel('Absolute Error ({0})'.format(units))
-
-        figure.delaxes(axes[2, 0])  # Get rid of the lower-left axis
-        figure.suptitle(title)
-        pyplot.tight_layout()
-        pyplot.subplots_adjust(top=0.95, right=0.99)
-        figure.savefig(os.path.join(output_folder, title + '.png'))
-        figure.savefig(os.path.join(output_folder, title + '.svg'))
-        pyplot.close(figure)
-
-        # Then the noise
-        title = "{0} noise prediction scores".format(system_name)
-        figure, axes = pyplot.subplots(3, 2, figsize=(20, 40), dpi=80)
-        for idx, error_name, units in [
-            (6, 'forward noise', 'm'),
-            (7, 'sideways noise', 'm'),
-            (8, 'vertical noise', 'm'),
-            (9, 'translational noise length', 'm'),
-            (11, 'rotational noise', 'rad'),
-        ]:
-            # Build a pandas dataframe for this particular error
-            df_data = {'source': [], 'errors': []}
-            for group_name, group_predict_pairs in group_predictions.items():
-                if len(group_predict_pairs[idx]) <= 0:
-                    continue
-                error_data = np.array(group_predict_pairs[idx])    # Offset for the noise columns
-                # Calculate absolute error
-                df_data['source'] += [group_name for _ in range(error_data.shape[0])]
-                df_data['errors'] += np.abs(error_data[:, 0] - error_data[:, 1]).tolist()
-            if len(df_data['errors']) <= 0:
-                continue
-            dataframe = pd.DataFrame(data=df_data)
-
-            # Assuming we got some amount of data, boxplot it
-            ax = axes[(idx - 6) // 2, (idx - 6) % 2]
-            dataframe.boxplot(column='errors', by='source', ax=ax)
-            ax.set_title(error_name)
-            ax.tick_params(axis='x', rotation=90)
-            ax.set_xlabel('')
-            ax.set_ylim(bottom=0)
-            ax.set_ylabel('Absolute Error ({0})'.format(units))
-
-        figure.delaxes(axes[2, 0])  # Get rid of the lower-left axis
-        figure.suptitle(title)
-        pyplot.tight_layout()
-        pyplot.subplots_adjust(top=0.95, right=0.99)
-        figure.savefig(os.path.join(output_folder, title + '.png'))
-        figure.savefig(os.path.join(output_folder, title + '.svg'))
-        pyplot.close(figure)
-
-        # Last the tracking
-        title = "{0} tracking precision recall".format(system_name)
-        figure, ax = pyplot.subplots(1, 1, figsize=(14, 10), dpi=80)
-
-        for group_name, group_predict_pairs in group_predictions.items():
-            if len(group_predict_pairs[12]) <= 0:
-                continue
-            error_data = np.array(group_predict_pairs[12])
-            precision, recall, _ = precision_recall_curve(error_data[:, 1], error_data[:, 0])
-            lines = ax.step(recall, precision, where='post', label=group_name, alpha=0.2)
-            ax.fill_between(recall, precision, step='post', alpha=0.2, color=lines[0].get_color())
-
-        figure.suptitle(title)
-        ax.set_xlim((0, 1))
-        ax.set_ylim((0, 1.05))
-        ax.set_xlabel('Recall')
-        ax.set_ylabel('Precision')
-        ax.legend()
-
-        pyplot.tight_layout()
-        pyplot.subplots_adjust(top=0.95, right=0.99)
-        figure.savefig(os.path.join(output_folder, title + '.png'))
-        figure.savefig(os.path.join(output_folder, title + '.svg'))
-        pyplot.close(figure)
+        create_errors_plots(
+            indexes_and_names=[
+                (0, '{0} forward error'.format(system_name), 'm'),
+                (1, '{0} sideways error'.format(system_name), 'm'),
+                (2, '{0} vertical error'.format(system_name), 'm'),
+                (3, '{0} translational error length'.format(system_name), 'm'),
+                (5, '{0} rotational error'.format(system_name), 'radians'),
+                (6, '{0} forward noise'.format(system_name), 'm'),
+                (7, '{0} sideways noise'.format(system_name), 'm'),
+                (8, '{0} vertical noise'.format(system_name), 'm'),
+                (9, '{0} translational noise length'.format(system_name), 'm'),
+                (11, '{0} rotational noise'.format(system_name), 'rad')
+            ],
+            group_predictions=group_predictions,
+            output_folder=output_folder
+        )
 
     def split_datasets_validation_and_training(self, system_id: bson.ObjectId, validation_datasets: typing.Set[str]) \
             -> typing.Tuple[
@@ -958,3 +865,110 @@ def predict_classification(data, target_data) -> typing.List[typing.Tuple[float,
     model.fit(train_x, train_y)
     predict_y = model.predict(val_x)
     return list(zip(predict_y, val_y))
+
+
+def create_errors_plots(indexes_and_names: typing.List[typing.Tuple[int, str, str]],
+                        group_predictions: typing.Mapping[str, typing.List[typing.List[typing.Tuple[float, float]]]],
+                        output_folder: str):
+    import pandas as pd
+
+    for idx, error_name, units in indexes_and_names:
+        # Build a pandas dataframe for this particular error
+        df_data = {'source': [], 'errors': [], 'inv_errors': []}
+        for group_name, group_predict_pairs in group_predictions.items():
+            if len(group_predict_pairs[idx]) <= 0:
+                continue
+            error_data = np.array(group_predict_pairs[idx])
+            # Calculate absolute error
+            df_data['source'] += [group_name for _ in range(error_data.shape[0])]
+            error = np.abs(error_data[:, 0] - error_data[:, 1])
+            df_data['errors'] += error.tolist()
+            df_data['inv_errors'] += (1 / (1 + error)).tolist()
+        if len(df_data['errors']) <= 0:
+            continue
+        dataframe = pd.DataFrame(data=df_data)
+
+        create_boxplot(
+            title=error_name,
+            dataframe=dataframe,
+            column='errors',
+            output_folder=output_folder,
+            units=units,
+            also_zoom=True
+        )
+        create_boxplot(
+            title='Inverse ' + error_name.lower(),
+            dataframe=dataframe,
+            column='inv_errors',
+            output_folder=output_folder,
+            units=units,
+            also_zoom=False
+        )
+        create_histogram(
+            title=error_name + ' histogram',
+            dataframe=dataframe,
+            column='errors',
+            output_folder=output_folder,
+            units=units,
+            also_zoom=True
+        )
+        create_histogram(
+            title='Inverse ' + error_name.lower() + ' histogram',
+            dataframe=dataframe,
+            column='inv_errors',
+            output_folder=output_folder,
+            units=units,
+            also_zoom=False
+        )
+
+
+def create_boxplot(title: str, dataframe, column: str, output_folder: str, units: str, also_zoom: bool = False):
+    import matplotlib.pyplot as pyplot
+
+    # Boxplot the data
+    figure, ax = pyplot.subplots(1, 1, figsize=(10, 10), dpi=80)
+    dataframe.boxplot(column=column, by='source', ax=ax)
+    ax.set_title('')
+    ax.tick_params(axis='x', rotation=90)
+    ax.set_ylim(bottom=0)
+    ax.set_xlabel('')
+    ax.set_ylabel('Absolute Error ({0})'.format(units))
+
+    figure.suptitle(title)
+    pyplot.tight_layout()
+    pyplot.subplots_adjust(top=0.95, right=0.99)
+    figure.savefig(os.path.join(output_folder, title + '.png'))
+    figure.savefig(os.path.join(output_folder, title + '.svg'))
+
+    # Re-save the figure zoomed in
+    if also_zoom:
+        ax.set_ylim(bottom=0, top=3 * np.std(dataframe[column].values))
+        figure.savefig(os.path.join(output_folder, title + '_zoomed.png'))
+        figure.savefig(os.path.join(output_folder, title + '_zoomed.svg'))
+    pyplot.close(figure)
+
+
+def create_histogram(title: str, dataframe, column: str, output_folder: str, units: str, also_zoom: bool = False):
+    import matplotlib.pyplot as pyplot
+
+    # Assuming we got some amount of data, boxplot it
+    figure, ax = pyplot.subplots(1, 1, figsize=(10, 10), dpi=80)
+    for group_name, group_df in dataframe.groupby(by='source'):
+        ax.hist(group_df[column].values, label=group_name, normed=True, bins=1000, alpha=0.5)
+    ax.set_xlim(left=0)
+    ax.set_xlabel('Absolute Error ({0})'.format(units))
+    ax.set_ylabel('frequency')
+
+    figure.suptitle(title)
+    pyplot.tight_layout()
+    pyplot.subplots_adjust(top=0.95, right=0.99)
+    figure.legend()
+    figure.savefig(os.path.join(output_folder, title + '.png'))
+    figure.savefig(os.path.join(output_folder, title + '.svg'))
+
+    # Re-save the figure zoomed in
+    if also_zoom:
+        ax.set_xlim(left=0, right=3 * np.std(dataframe[column].values))
+        figure.savefig(os.path.join(output_folder, title + '_zoomed.png'))
+        figure.savefig(os.path.join(output_folder, title + '_zoomed.svg'))
+    pyplot.close(figure)
