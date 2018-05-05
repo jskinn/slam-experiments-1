@@ -407,6 +407,7 @@ class TestPerformAnalysis(unittest.TestCase):
         self.assertTrue(np.all(results_cache[result_id] >= 0))
 
     def test_create_error_plots(self):
+        self.skipTest('Too long')
         output_folder = 'temp-test-create-error-plots'
         system_name = 'test_system'
         group_names = [
@@ -450,6 +451,7 @@ class TestPerformAnalysis(unittest.TestCase):
         )
 
     def test_create_distibution_plots(self):
+        self.skipTest('Too long')
         output_folder = 'temp-test-create-distribution-plots'
         quality_names = ['Real World', 'Max quality', 'Min quality']
         predictors = create_test_predictors()
@@ -467,6 +469,89 @@ class TestPerformAnalysis(unittest.TestCase):
             errors_by_quality=errors_by_quality,
             output_folder=output_folder,
             also_zoom=True
+        )
+
+    def test_analyse_distributions(self):
+        def mock_deserialize(s_result):
+            mock_result = mock.Mock()
+            mock_result.identifier = s_result['_id']
+            mock_result.observations = np.random.normal(0, 1, size=(1000, 25))
+            return mock_result
+
+        mock_db_client = mock_db_client_fac.create().mock
+        mock_db_client.results_collection = mock.Mock()
+        mock_db_client.results_collection.find.side_effect = \
+            lambda query: [{'_id': oid} for oid in query['_id']['$in']]
+        mock_db_client.deserialize_entity.side_effect = mock_deserialize
+        system_name = 'test_system'
+        system_id = bson.ObjectId()
+        output_folder = 'temp-test-analyse-distributions'
+
+        subject = gprwe.GeneratedPredictRealWorldExperiment(
+            systems={system_name: system_id},
+            simulators={'Block World': bson.ObjectId(), 'Block World 2': bson.ObjectId()},
+            trajectory_groups={
+                'KITTI trajectory 1': tg.TrajectoryGroup(
+                    name='KITTI trajectory 1',
+                    reference_id=bson.ObjectId(),
+                    mappings=[('Block World', {'location': [12, -63.2, 291.1], 'rotation': [-22, -214, 121]})],
+                    baseline_configuration={'test': bson.ObjectId()},
+                    controller_id=bson.ObjectId(),
+                    generated_datasets={
+                        'Block World': {
+                            'max quality': bson.ObjectId(),
+                            'min quality': bson.ObjectId()
+                        },
+                        'Block World 2': {
+                            'max quality': bson.ObjectId(),
+                            'min quality': bson.ObjectId()
+                        }
+                    }
+                ),
+                'KITTI trajectory 2': tg.TrajectoryGroup(
+                    name='KITTI trajectory 2',
+                    reference_id=bson.ObjectId(),
+                    mappings=[('Block World', {'location': [12, -63.2, 291.1], 'rotation': [-22, -214, 121]})],
+                    baseline_configuration={'test': bson.ObjectId()},
+                    controller_id=bson.ObjectId(),
+                    generated_datasets={
+                        'Block World': {
+                            'max quality': bson.ObjectId(),
+                            'min quality': bson.ObjectId()
+                        },
+                        'Block World 2': {
+                            'max quality': bson.ObjectId(),
+                            'min quality': bson.ObjectId()
+                        }
+                    }
+                )
+            },
+            benchmarks={
+                'Estimate Errors': bson.ObjectId()
+            },
+            enabled=True
+        )
+        for system_id in subject.systems.values():
+            for traj_group in subject.trajectory_groups.values():
+                for dataset_id in traj_group.get_all_dataset_ids():
+                    subject.store_trial_results(
+                        system_id=system_id, image_source_id=dataset_id,
+                        trial_result_ids=[bson.ObjectId() for _ in range(3)], db_client=mock_db_client)
+                    for benchmark_id in subject.benchmarks.values():
+                        subject.store_benchmark_result(
+                            system_id=system_id,
+                            image_source_id=dataset_id,
+                            benchmark_id=benchmark_id,
+                            benchmark_result_id=bson.ObjectId()
+                        )
+
+        results_cache = {}
+        #with mock.patch('generated_predict_rw_experiment.create_distribution_plots'):
+        subject.analyse_distributions(
+            system_name=system_name,
+            output_folder=output_folder,
+            db_client=mock_db_client,
+            results_cache=results_cache
         )
 
 

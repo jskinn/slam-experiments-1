@@ -17,7 +17,7 @@ import arvet.batch_analysis.task_manager
 import arvet.simulation.unrealcv.unrealcv_simulator as uecv_sim
 
 import arvet_slam.systems.slam.orbslam2 as orbslam2
-#import arvet_slam.systems.visual_odometry.libviso2.libviso2 as libviso2
+import arvet_slam.systems.visual_odometry.libviso2.libviso2 as libviso2
 
 import data_helpers
 import trajectory_group as tg
@@ -186,11 +186,11 @@ class GeneratedPredictRealWorldExperiment(arvet.batch_analysis.experiment.Experi
 
         # --------- SYSTEMS -----------
         # LibVisO2
-        #self.import_system(
-        #    name='LibVisO',
-        #    system=libviso2.LibVisOSystem(),
-        #    db_client=db_client
-        #)
+        self.import_system(
+            name='LibVisO',
+            system=libviso2.LibVisOSystem(),
+            db_client=db_client
+        )
 
         # ORBSLAM2 - Create 3 variants; stereo, mono, and rgbd
         # These datasets don't have
@@ -483,7 +483,7 @@ class GeneratedPredictRealWorldExperiment(arvet.batch_analysis.experiment.Experi
         system_id = self.systems[system_name]
         os.makedirs(output_folder, exist_ok=True)
 
-        all_errors_by_quality = {'Real World': np.array()}
+        all_errors_by_quality = {}
         for trajectory_group in self.trajectory_groups.values():
             result_id = self.get_benchmark_result(system_id, trajectory_group.reference_dataset,
                                                   self.benchmarks['Estimate Errors'])
@@ -528,7 +528,6 @@ class GeneratedPredictRealWorldExperiment(arvet.batch_analysis.experiment.Experi
             output_folder=output_folder,
             also_zoom=True
         )
-
 
     def analyse_validation_groups(self, system_name: str, validation_sets: typing.Iterable[typing.Set[str]],
                                   output_folder: str, db_client: arvet.database.client.DatabaseClient,
@@ -955,7 +954,7 @@ def create_distribution_plots(system_name: str, group_name, errors_by_quality: t
         error = get_error(errors_by_quality['Real World'])
         rw_mean = np.mean(error)
         rw_std = np.std(error)
-        figure, ax = pyplot.subplots(1, 1, figsize=(10, 10), dpi=80)
+        figure, ax = pyplot.subplots(1, 1, figsize=(12, 10), dpi=80)
         for quality_name, errors in errors_by_quality.items():
             error = get_error(errors)
             std = np.std(error)
@@ -963,8 +962,8 @@ def create_distribution_plots(system_name: str, group_name, errors_by_quality: t
                 max_std = std
             ax.hist(
                 error,
-                label=quality_name + " (effect size: {0})".format((np.mean(error) - rw_mean) / rw_std) \
-                    if not quality_name == 'Real World' else quality_name,
+                label=quality_name + " (effect size: {0})".format((np.mean(error) - rw_mean) / rw_std)
+                if not quality_name == 'Real World' else quality_name,
                 normed=True,
                 bins=1000,
                 alpha=0.5
@@ -1051,7 +1050,7 @@ def create_boxplot(title: str, dataframe, column: str, output_folder: str, units
     import matplotlib.pyplot as pyplot
 
     # Boxplot the data
-    figure, ax = pyplot.subplots(1, 1, figsize=(10, 10), dpi=80)
+    figure, ax = pyplot.subplots(1, 1, figsize=(12, 10), dpi=80)
     dataframe.boxplot(column=column, by='source', ax=ax)
     ax.set_title('')
     ax.tick_params(axis='x', rotation=90)
@@ -1077,7 +1076,7 @@ def create_histogram(title: str, dataframe, column: str, output_folder: str, uni
     import matplotlib.pyplot as pyplot
 
     # Assuming we got some amount of data, boxplot it
-    figure, ax = pyplot.subplots(1, 1, figsize=(10, 10), dpi=80)
+    figure, ax = pyplot.subplots(1, 1, figsize=(12, 10), dpi=80)
     for group_name, group_df in dataframe.groupby(by='source'):
         ax.hist(group_df[column].values, label=group_name, normed=True, bins=1000, alpha=0.5)
     ax.set_xlim(left=0)
