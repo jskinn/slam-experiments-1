@@ -409,6 +409,16 @@ class GeneratedPredictRealWorldExperiment(arvet.batch_analysis.experiment.Experi
                     'TUM rgbd_dataset_frieburg3_structure_texture_far', 'TUM rgbd_dataset_frieburg3_walking_xyz']
         kitti_sets = ['KITTI trajectory {}'.format(sequence_num) for sequence_num in range(11)]
 
+        # --------- DISTRIBUTIONS -----------
+        # Plot the distributions for the different errors
+        for system_name in self.systems.keys():
+            self.analyse_distributions(
+                system_name=system_name,
+                output_folder=os.path.join(type(self).get_output_folder(), system_name, 'distributions'),
+                db_client=db_client,
+                results_cache=results_cache
+            )
+
         # --------- MONOCULAR -----------
         # In the first experiment, we want to to pick a validation dataset from each group to validate on.
         self.analyse_validation_groups(
@@ -464,6 +474,61 @@ class GeneratedPredictRealWorldExperiment(arvet.batch_analysis.experiment.Experi
             db_client=db_client,
             results_cache=results_cache
         )
+
+    def analyse_distributions(self, system_name: str, output_folder: str,
+                              db_client: arvet.database.client.DatabaseClient, results_cache: dict):
+        if system_name not in self.systems:
+            logging.getLogger(__name__).info("Cannot find system \"{0}\"".format(system_name))
+            return
+        system_id = self.systems[system_name]
+        os.makedirs(output_folder, exist_ok=True)
+
+        all_errors_by_quality = {'Real World': np.array()}
+        for trajectory_group in self.trajectory_groups.values():
+            result_id = self.get_benchmark_result(system_id, trajectory_group.reference_dataset,
+                                                  self.benchmarks['Estimate Errors'])
+            if result_id is None:
+                continue
+            _, errors = collect_errors_and_input({result_id}, db_client, results_cache)
+
+            if 'Real World' not in all_errors_by_quality:
+                all_errors_by_quality['Real World'] = errors
+            else:
+                all_errors_by_quality['Real World'] = np.vstack((all_errors_by_quality['Real World'], errors))
+
+            errors_by_quality = {'Real World': errors}
+            for world_name, quality_map in trajectory_group.generated_datasets.items():
+                for quality_name, dataset_id in quality_map.items():
+                    result_id = self.get_benchmark_result(system_id, dataset_id, self.benchmarks['Estimate Errors'])
+                    if result_id is not None:
+                        _, errors = collect_errors_and_input({result_id}, db_client, results_cache)
+
+                        if quality_name not in errors_by_quality:
+                            errors_by_quality[quality_name] = errors
+                        else:
+                            errors_by_quality[quality_name] = np.vstack((errors_by_quality[quality_name], errors))
+
+                        if quality_name not in all_errors_by_quality:
+                            all_errors_by_quality[quality_name] = errors
+                        else:
+                            all_errors_by_quality[quality_name] = np.vstack(
+                                (all_errors_by_quality[quality_name], errors))
+
+            create_distribution_plots(
+                system_name=system_name,
+                group_name=trajectory_group.name,
+                errors_by_quality=errors_by_quality,
+                output_folder=output_folder,
+                also_zoom=True
+            )
+        create_distribution_plots(
+            system_name=system_name,
+            group_name='all data',
+            errors_by_quality=all_errors_by_quality,
+            output_folder=output_folder,
+            also_zoom=True
+        )
+
 
     def analyse_validation_groups(self, system_name: str, validation_sets: typing.Iterable[typing.Set[str]],
                                   output_folder: str, db_client: arvet.database.client.DatabaseClient,
@@ -867,6 +932,66 @@ def predict_classification(data, target_data) -> typing.List[typing.Tuple[float,
     return list(zip(predict_y, val_y))
 
 
+def create_distribution_plots(system_name: str, group_name, errors_by_quality: typing.Mapping[str, np.ndarray],
+                              output_folder: str, also_zoom: bool = False):
+    import matplotlib.pyplot as pyplot
+
+    for get_error, error_name, units, bounds in [
+        (lambda errs: errs[:, 0], 'forward error', 'm', (None, None)),
+        (lambda errs: errs[:, 1], 'sideways error', 'm', (None, None)),
+        (lambda errs: errs[:, 2], 'vertical error', 'm', (None, None)),
+        (lambda errs: errs[:, 3], 'translational error length', 'm', (0, None)),
+        (lambda errs: 1 / (1 + errs[:, 3]), 'inverse translational error length', 'm', (0, 1)),
+        (lambda errs: errs[:, 5], 'rotational error', 'radians', (0, np.pi)),
+        (lambda errs: errs[:, 6], 'forward noise', 'm', (None, None)),
+        (lambda errs: errs[:, 7], 'sideways noise', 'm', (None, None)),
+        (lambda errs: errs[:, 8], 'vertical noise', 'm', (None, None)),
+        (lambda errs: errs[:, 9], 'translational noise length', 'm', (0, None)),
+        (lambda errs: 1 / (1 + errs[:, 9]), 'inverse translational noise length', 'm', (0, 1)),
+        (lambda errs: errs[:, 11], 'rotational noise', 'rad', (0, np.pi))
+    ]:
+        title = "{0} on {1} {2} distribution".format(system_name, group_name, error_name)
+        max_std = -1
+        error = get_error(errors_by_quality['Real World'])
+        rw_mean = np.mean(error)
+        rw_std = np.std(error)
+        figure, ax = pyplot.subplots(1, 1, figsize=(10, 10), dpi=80)
+        for quality_name, errors in errors_by_quality.items():
+            error = get_error(errors)
+            std = np.std(error)
+            if std > max_std:
+                max_std = std
+            ax.hist(
+                error,
+                label=quality_name + " (effect size: {0})".format((np.mean(error) - rw_mean) / rw_std) \
+                    if not quality_name == 'Real World' else quality_name,
+                normed=True,
+                bins=1000,
+                alpha=0.5
+            )
+        if bounds[0] is not None:
+            ax.set_xlim(left=bounds[0])
+        if bounds[1] is not None:
+            ax.set_xlim(right=bounds[1])
+        ax.set_xlabel('Absolute Error ({0})'.format(units))
+        ax.set_ylabel('frequency')
+        ax.legend()
+
+        figure.suptitle(title)
+        pyplot.tight_layout()
+        pyplot.subplots_adjust(top=0.95, right=0.99)
+        figure.savefig(os.path.join(output_folder, title + '.png'))
+        figure.savefig(os.path.join(output_folder, title + '.svg'))
+
+        # Re-save the figure zoomed in
+        if also_zoom and (bounds[0] is None or bounds[1] is None):
+            ax.set_xlim(left=-3 * max_std if bounds[0] is None else bounds[0],
+                        right=3 * max_std if bounds[1] is None else bounds[1])
+            figure.savefig(os.path.join(output_folder, title + '_zoomed.png'))
+            figure.savefig(os.path.join(output_folder, title + '_zoomed.svg'))
+        pyplot.close(figure)
+
+
 def create_errors_plots(indexes_and_names: typing.List[typing.Tuple[int, str, str]],
                         group_predictions: typing.Mapping[str, typing.List[typing.List[typing.Tuple[float, float]]]],
                         output_folder: str):
@@ -958,11 +1083,11 @@ def create_histogram(title: str, dataframe, column: str, output_folder: str, uni
     ax.set_xlim(left=0)
     ax.set_xlabel('Absolute Error ({0})'.format(units))
     ax.set_ylabel('frequency')
+    ax.legend()
 
     figure.suptitle(title)
     pyplot.tight_layout()
     pyplot.subplots_adjust(top=0.95, right=0.99)
-    figure.legend()
     figure.savefig(os.path.join(output_folder, title + '.png'))
     figure.savefig(os.path.join(output_folder, title + '.svg'))
 

@@ -407,7 +407,7 @@ class TestPerformAnalysis(unittest.TestCase):
         self.assertTrue(np.all(results_cache[result_id] >= 0))
 
     def test_create_error_plots(self):
-        output_folder = 'temp'
+        output_folder = 'temp-test-create-error-plots'
         system_name = 'test_system'
         group_names = [
             'Real world',
@@ -420,13 +420,15 @@ class TestPerformAnalysis(unittest.TestCase):
         ]
 
         group_predictions = {}
+        data_len = 100
         for group_name in group_names:
             group_predictions[group_name] = []
             for _ in range(12):
-                values = np.random.exponential(1, size=1000)
-                estimates = values + np.random.choice((-1, 1), size=1000) * np.random.exponential(0.1, size=1000)
+                values = np.random.exponential(1, size=data_len)
+                estimates = values + np.random.choice((-1, 1), size=data_len) * \
+                            np.random.exponential(0.1, size=data_len)
                 group_predictions[group_name].append(
-                    [(values[obs_idx], estimates[obs_idx]) for obs_idx in range(1000)]
+                    [(values[obs_idx], estimates[obs_idx]) for obs_idx in range(data_len)]
                 )
 
         os.makedirs(output_folder, exist_ok=True)
@@ -445,6 +447,26 @@ class TestPerformAnalysis(unittest.TestCase):
             ],
             group_predictions=group_predictions,
             output_folder=output_folder
+        )
+
+    def test_create_distibution_plots(self):
+        output_folder = 'temp-test-create-distribution-plots'
+        quality_names = ['Real World', 'Max quality', 'Min quality']
+        predictors = create_test_predictors()
+        errors = create_all_errors(predictors)
+        obs_size = len(predictors) // len(quality_names)
+        errors_by_quality = {
+            quality_name: errors[obs_size * ridx:obs_size * (ridx + 1), :]
+            for ridx, quality_name in enumerate(quality_names)
+        }
+
+        os.makedirs(output_folder, exist_ok=True)
+        gprwe.create_distribution_plots(
+            system_name='test system',
+            group_name='all data',
+            errors_by_quality=errors_by_quality,
+            output_folder=output_folder,
+            also_zoom=True
         )
 
 
