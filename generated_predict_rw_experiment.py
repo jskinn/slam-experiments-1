@@ -17,7 +17,7 @@ import arvet.batch_analysis.task_manager
 import arvet.simulation.unrealcv.unrealcv_simulator as uecv_sim
 
 import arvet_slam.systems.slam.orbslam2 as orbslam2
-import arvet_slam.systems.visual_odometry.libviso2.libviso2 as libviso2
+# import arvet_slam.systems.visual_odometry.libviso2.libviso2 as libviso2
 
 import data_helpers
 import trajectory_group as tg
@@ -186,11 +186,11 @@ class GeneratedPredictRealWorldExperiment(arvet.batch_analysis.experiment.Experi
 
         # --------- SYSTEMS -----------
         # LibVisO2
-        self.import_system(
-            name='LibVisO',
-            system=libviso2.LibVisOSystem(),
-            db_client=db_client
-        )
+        #self.import_system(
+        #    name='LibVisO',
+        #    system=libviso2.LibVisOSystem(),
+        #    db_client=db_client
+        #)
 
         # ORBSLAM2 - Create 3 variants; stereo, mono, and rgbd
         # These datasets don't have
@@ -954,41 +954,71 @@ def create_distribution_plots(system_name: str, group_name, errors_by_quality: t
         error = get_error(errors_by_quality['Real World'])
         rw_mean = np.mean(error)
         rw_std = np.std(error)
+        show = False
         figure, ax = pyplot.subplots(1, 1, figsize=(12, 10), dpi=80)
         for quality_name, errors in errors_by_quality.items():
             error = get_error(errors)
             std = np.std(error)
             if std > max_std:
                 max_std = std
-            ax.hist(
-                error,
-                label=quality_name + " (effect size: {0})".format((np.mean(error) - rw_mean) / rw_std)
-                if not quality_name == 'Real World' else quality_name,
-                normed=True,
-                bins=1000,
-                alpha=0.5
-            )
-        if bounds[0] is not None:
-            ax.set_xlim(left=bounds[0])
-        if bounds[1] is not None:
-            ax.set_xlim(right=bounds[1])
-        ax.set_xlabel('Absolute Error ({0})'.format(units))
-        ax.set_ylabel('frequency')
-        ax.legend()
+            if len(error) > 0 and np.max(error) > np.min(error):
+                show = True
+                ax.hist(
+                    error,
+                    label=quality_name + " (effect size: {0})".format((np.mean(error) - rw_mean) / rw_std)
+                    if not quality_name == 'Real World' else quality_name,
+                    density=True,
+                    bins=1000,
+                    alpha=0.5
+                )
+        if show:
+            if bounds[0] is not None:
+                ax.set_xlim(left=bounds[0])
+            if bounds[1] is not None:
+                ax.set_xlim(right=bounds[1])
+            ax.set_xlabel('Absolute Error ({0})'.format(units))
+            ax.set_ylabel('frequency')
+            ax.legend()
 
-        figure.suptitle(title)
-        pyplot.tight_layout()
-        pyplot.subplots_adjust(top=0.95, right=0.99)
-        figure.savefig(os.path.join(output_folder, title + '.png'))
-        figure.savefig(os.path.join(output_folder, title + '.svg'))
+            figure.suptitle(title)
+            pyplot.tight_layout()
+            pyplot.subplots_adjust(top=0.95, right=0.99)
+            figure.savefig(os.path.join(output_folder, title + '.png'))
+            figure.savefig(os.path.join(output_folder, title + '.svg'))
+            pyplot.close(figure)
 
-        # Re-save the figure zoomed in
+        # Re-compute the figure zoomed in
         if also_zoom and (bounds[0] is None or bounds[1] is None):
-            ax.set_xlim(left=-3 * max_std if bounds[0] is None else bounds[0],
-                        right=3 * max_std if bounds[1] is None else bounds[1])
-            figure.savefig(os.path.join(output_folder, title + '_zoomed.png'))
-            figure.savefig(os.path.join(output_folder, title + '_zoomed.svg'))
-        pyplot.close(figure)
+            zoom_min = -3 * max_std if bounds[0] is None else bounds[0]
+            zoom_max = 3 * max_std if bounds[1] is None else bounds[1]
+
+            show = False
+            figure, ax = pyplot.subplots(1, 1, figsize=(12, 10), dpi=80)
+            for quality_name, errors in errors_by_quality.items():
+                error = get_error(errors)
+                error = error[np.where((error != np.nan) * (error > zoom_min) * (error < zoom_max))]
+                if len(error) > 0 and np.max(error) > np.min(error):
+                    show = True
+                    ax.hist(
+                        error,
+                        label=quality_name + " (effect size: {0})".format((np.mean(error) - rw_mean) / rw_std)
+                        if not quality_name == 'Real World' else quality_name,
+                        density=True,
+                        bins=1000,
+                        alpha=0.5
+                    )
+            if show:
+                ax.set_xlim(left=zoom_min, right=zoom_max)
+                ax.set_xlabel('Absolute Error ({0})'.format(units))
+                ax.set_ylabel('frequency')
+                ax.legend()
+
+                figure.suptitle(title + ' central 3 standard deviations')
+                pyplot.tight_layout()
+                pyplot.subplots_adjust(top=0.95, right=0.99)
+                figure.savefig(os.path.join(output_folder, title + '_zoomed.png'))
+                figure.savefig(os.path.join(output_folder, title + '_zoomed.svg'))
+                pyplot.close(figure)
 
 
 def create_errors_plots(indexes_and_names: typing.List[typing.Tuple[int, str, str]],
@@ -1077,22 +1107,45 @@ def create_histogram(title: str, dataframe, column: str, output_folder: str, uni
 
     # Assuming we got some amount of data, boxplot it
     figure, ax = pyplot.subplots(1, 1, figsize=(12, 10), dpi=80)
+    show = False
     for group_name, group_df in dataframe.groupby(by='source'):
-        ax.hist(group_df[column].values, label=group_name, normed=True, bins=1000, alpha=0.5)
-    ax.set_xlim(left=0)
-    ax.set_xlabel('Absolute Error ({0})'.format(units))
-    ax.set_ylabel('frequency')
-    ax.legend()
+        data = group_df[column].values
+        if len(data) > 0 and np.max(data) > np.min(data):
+            show = True
+            ax.hist(data, label=group_name, density=True, bins=1000, alpha=0.5)
+    if show:
+        ax.set_xlim(left=0)
+        ax.set_xlabel('Absolute Error ({0})'.format(units))
+        ax.set_ylabel('frequency')
+        ax.legend()
 
-    figure.suptitle(title)
-    pyplot.tight_layout()
-    pyplot.subplots_adjust(top=0.95, right=0.99)
-    figure.savefig(os.path.join(output_folder, title + '.png'))
-    figure.savefig(os.path.join(output_folder, title + '.svg'))
+        figure.suptitle(title)
+        pyplot.tight_layout()
+        pyplot.subplots_adjust(top=0.95, right=0.99)
+        figure.savefig(os.path.join(output_folder, title + '.png'))
+        figure.savefig(os.path.join(output_folder, title + '.svg'))
+        pyplot.close(figure)
 
     # Re-save the figure zoomed in
     if also_zoom:
-        ax.set_xlim(left=0, right=3 * np.std(dataframe[column].values))
-        figure.savefig(os.path.join(output_folder, title + '_zoomed.png'))
-        figure.savefig(os.path.join(output_folder, title + '_zoomed.svg'))
-    pyplot.close(figure)
+        zoom_max = 3 * np.std(dataframe[column].values)
+        show = False
+        figure, ax = pyplot.subplots(1, 1, figsize=(12, 10), dpi=80)
+        for group_name, group_df in dataframe.groupby(by='source'):
+            data = group_df[column].values
+            data = data[np.where((data != np.nan) * (data > 0) * (data < zoom_max))]
+            if len(data) > 0 and np.max(data) > np.min(data):
+                show = True
+                ax.hist(data, label=group_name, density=True, bins=1000, alpha=0.5)
+        if show:
+            ax.set_xlim(left=0, right=zoom_max)
+            ax.set_xlabel('Absolute Error ({0})'.format(units))
+            ax.set_ylabel('frequency')
+            ax.legend()
+    
+            figure.suptitle(title + ' central 3 standard deviations')
+            pyplot.tight_layout()
+            pyplot.subplots_adjust(top=0.95, right=0.99)
+            figure.savefig(os.path.join(output_folder, title + '_zoomed.png'))
+            figure.savefig(os.path.join(output_folder, title + '_zoomed.svg'))
+            pyplot.close(figure)
