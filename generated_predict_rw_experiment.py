@@ -17,7 +17,7 @@ import arvet.batch_analysis.task_manager
 import arvet.simulation.unrealcv.unrealcv_simulator as uecv_sim
 
 import arvet_slam.systems.slam.orbslam2 as orbslam2
-# import arvet_slam.systems.visual_odometry.libviso2.libviso2 as libviso2
+import arvet_slam.systems.visual_odometry.libviso2.libviso2 as libviso2
 
 import data_helpers
 import trajectory_group as tg
@@ -186,11 +186,11 @@ class GeneratedPredictRealWorldExperiment(arvet.batch_analysis.experiment.Experi
 
         # --------- SYSTEMS -----------
         # LibVisO2
-        #self.import_system(
-        #    name='LibVisO',
-        #    system=libviso2.LibVisOSystem(),
-        #    db_client=db_client
-        #)
+        self.import_system(
+            name='LibVisO',
+            system=libviso2.LibVisOSystem(),
+            db_client=db_client
+        )
 
         # ORBSLAM2 - Create 3 variants; stereo, mono, and rgbd
         # These datasets don't have
