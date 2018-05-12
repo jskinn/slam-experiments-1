@@ -451,7 +451,7 @@ class TestPerformAnalysis(unittest.TestCase):
         )
 
     def test_create_distibution_plots(self):
-        self.skipTest('Too long')
+        # self.skipTest('Too long')
         output_folder = 'temp-test-create-distribution-plots'
         quality_names = ['Real World', 'Max quality', 'Min quality']
         predictors = create_test_predictors()
@@ -476,6 +476,7 @@ class TestPerformAnalysis(unittest.TestCase):
             mock_result = mock.Mock()
             mock_result.identifier = s_result['_id']
             mock_result.observations = np.random.normal(0, 1, size=(1000, 25))
+            mock_result.observations[:, 6] = np.array([np.nan for _ in range(1000)])
             return mock_result
 
         mock_db_client = mock_db_client_fac.create().mock
