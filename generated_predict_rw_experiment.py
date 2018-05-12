@@ -934,6 +934,7 @@ def predict_classification(data, target_data) -> typing.List[typing.Tuple[float,
 def create_distribution_plots(system_name: str, group_name, errors_by_quality: typing.Mapping[str, np.ndarray],
                               output_folder: str, also_zoom: bool = False):
     import matplotlib.pyplot as pyplot
+    from scipy.stats import ks_2samp
 
     for get_error, error_name, units, bounds in [
         (lambda errs: errs[:, 0], 'forward error', 'm', (None, None)),
@@ -951,9 +952,7 @@ def create_distribution_plots(system_name: str, group_name, errors_by_quality: t
     ]:
         title = "{0} on {1} {2} distribution".format(system_name, group_name, error_name)
         max_std = -1
-        error = get_error(errors_by_quality['Real World'])
-        rw_mean = np.mean(error)
-        rw_std = np.std(error)
+        rw_error = get_error(errors_by_quality['Real World'])
         show = False
         figure, ax = pyplot.subplots(1, 1, figsize=(12, 10), dpi=80)
         for quality_name, errors in errors_by_quality.items():
@@ -963,9 +962,10 @@ def create_distribution_plots(system_name: str, group_name, errors_by_quality: t
                 max_std = std
             if len(error) > 0 and np.max(error) > np.min(error):
                 show = True
+                ks_stat, ks_pval = ks_2samp(error, rw_error)
                 ax.hist(
                     error,
-                    label=quality_name + " (effect size: {0})".format((np.mean(error) - rw_mean) / rw_std)
+                    label=quality_name + " (ks score: {0}, pval: {1})".format(ks_stat, ks_pval)
                     if not quality_name == 'Real World' else quality_name,
                     density=True,
                     bins=1000,
@@ -999,9 +999,10 @@ def create_distribution_plots(system_name: str, group_name, errors_by_quality: t
                 error = error[np.where((error != np.nan) * (error > zoom_min) * (error < zoom_max))]
                 if len(error) > 0 and np.max(error) > np.min(error):
                     show = True
+                    ks_stat, ks_pval = ks_2samp(error, rw_error)
                     ax.hist(
                         error,
-                        label=quality_name + " (effect size: {0})".format((np.mean(error) - rw_mean) / rw_std)
+                        label=quality_name + " (ks score: {0}, pval: {1})".format(ks_stat, ks_pval)
                         if not quality_name == 'Real World' else quality_name,
                         density=True,
                         bins=1000,
