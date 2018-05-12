@@ -1,6 +1,6 @@
 # Copyright (c) 2017, John Skinner
-import typing
 import os.path
+import typing
 import numpy as np
 
 import arvet.database.client
@@ -10,15 +10,14 @@ import arvet.batch_analysis.experiment
 import arvet.batch_analysis.task_manager
 
 import arvet_slam.systems.slam.orbslam2 as orbslam2
-# import arvet_slam.systems.visual_odometry.libviso2.libviso2 as libviso2
+import arvet_slam.systems.visual_odometry.libviso2.libviso2 as libviso2
 
 import euroc_origins
 import tum_origins
-import kitti_origins
 import base_generated_predict_rw_experiment as bgprwe
 
 
-class GeneratedPredictRealWorldExperiment(bgprwe.BaseGeneratedPredictRealWorldExperiment):
+class SmallGeneratedPredictRealWorldExperiment(bgprwe.BaseGeneratedPredictRealWorldExperiment):
 
     def __init__(self, systems=None,
                  simulators=None,
@@ -145,25 +144,13 @@ class GeneratedPredictRealWorldExperiment(bgprwe.BaseGeneratedPredictRealWorldEx
                 path_manager=path_manager
             )
 
-        # Import KITTI datasets
-        for sequence_num in range(11):
-            self.import_dataset(
-                module_name='arvet_slam.dataset.kitti.kitti_loader',
-                name='KITTI trajectory {}'.format(sequence_num),
-                path=os.path.join('datasets', 'KITTI', 'dataset'),
-                additional_args={'sequence_number': sequence_num},
-                mappings=kitti_origins.get_mapping(sequence_num),
-                task_manager=task_manager,
-                path_manager=path_manager
-            )
-
         # --------- SYSTEMS -----------
         # LibVisO2
-        #self.import_system(
-        #    name='LibVisO',
-        #    system=libviso2.LibVisOSystem(),
-        #    db_client=db_client
-        #)
+        self.import_system(
+            name='LibVisO',
+            system=libviso2.LibVisOSystem(),
+            db_client=db_client
+        )
 
         # ORBSLAM2 - Create 3 variants; stereo, mono, and rgbd
         # These datasets don't have
@@ -188,28 +175,7 @@ class GeneratedPredictRealWorldExperiment(bgprwe.BaseGeneratedPredictRealWorldEx
         :return:
         """
         return [('max quality', {
-            # }), ('reduced resolution', {
-            #     'resolution': {'width': 256, 'height': 144}  # Extremely low res
-            # }), ('narrow fov', {
-            #     'fov': 15
-            # }), ('no depth-of-field', {
-            #     'depth_of_field_enabled': False
-            # }), ('no textures', {
-            #     'texture_mipmap_bias': 8
-            # }), ('no normal maps', {
-            #     'normal_maps_enabled': False,  # No normal maps
-            # }), ('no reflections', {
-            #     'roughness_enabled': False  # No reflections
-            # }), ('simple geometry', {
-            #     'geometry_decimation': 4,   # Simple geometry
-            # }), ('low quality', {
-            #     # low quality
-            #     'depth_of_field_enabled': False,
-            #     'texture_mipmap_bias': 8,
-            #     'normal_maps_enabled': False,
-            #     'roughness_enabled': False,
-            #     'geometry_decimation': 4,
-        }), ('worst visual quality', {
+        }), ('min quality', {
             # absolute minimum visual quality, can still reduce FOV and resolution
             'lit_mode': False,
             'depth_of_field_enabled': False,
@@ -226,7 +192,7 @@ class GeneratedPredictRealWorldExperiment(bgprwe.BaseGeneratedPredictRealWorldEx
         :param db_client:
         :return:
         """
-        random_state = np.random.RandomState(20142)
+        random_state = np.random.RandomState(48625)
         results_cache = {}
         euroc_sets = ['EuRoC MH_01_easy', 'EuRoC MH_02_easy', 'EuRoC MH_03_medium', 'EuRoC MH_04_difficult',
                       'EuRoC MH_05_difficult', 'EuRoC V1_01_easy', 'EuRoC V1_02_medium', 'EuRoC V1_03_difficult',
@@ -235,7 +201,6 @@ class GeneratedPredictRealWorldExperiment(bgprwe.BaseGeneratedPredictRealWorldEx
                     'TUM rgbd_dataset_frieburg1_xyz', 'TUM rgbd_dataset_frieburg2_desk',
                     'TUM rgbd_dataset_frieburg2_rpy', 'TUM rgbd_dataset_frieburg2_xyz',
                     'TUM rgbd_dataset_frieburg3_structure_texture_far', 'TUM rgbd_dataset_frieburg3_walking_xyz']
-        kitti_sets = ['KITTI trajectory {}'.format(sequence_num) for sequence_num in range(11)]
 
         # --------- DISTRIBUTIONS -----------
         # Plot the distributions for the different errors
@@ -248,23 +213,14 @@ class GeneratedPredictRealWorldExperiment(bgprwe.BaseGeneratedPredictRealWorldEx
             )
 
         # --------- MONOCULAR -----------
-        # In the first experiment, we want to to pick a validation dataset from each group to validate on.
+        # Pick two validation datasets from each group to validate on.
         self.analyse_validation_groups(
             system_name='ORBSLAM2 monocular',
-            validation_sets=[{
-                random_state.choice(euroc_sets),
-                random_state.choice(tum_sets),
-                random_state.choice(kitti_sets)
-            } for _ in range(10)],
-            output_folder=os.path.join(type(self).get_output_folder(), 'ORBSLAM monocular', 'one from each domain'),
-            db_client=db_client,
-            results_cache=results_cache
-        )
-        # In the second set, we want to test cross domain evaluation by excluding entire datasets as validation
-        self.analyse_validation_groups(
-            system_name='ORBSLAM2 monocular',
-            validation_sets=[set(euroc_sets), set(tum_sets), set(kitti_sets)],
-            output_folder=os.path.join(type(self).get_output_folder(), 'ORBSLAM monocular', 'cross domain'),
+            validation_sets=[
+                set(random_state.choice(euroc_sets, 2, replace=False)) |
+                set(random_state.choice(tum_sets, 2, replace=False))
+                for _ in range(10)],
+            output_folder=os.path.join(type(self).get_output_folder(), 'ORBSLAM monocular'),
             db_client=db_client,
             results_cache=results_cache
         )
@@ -275,18 +231,9 @@ class GeneratedPredictRealWorldExperiment(bgprwe.BaseGeneratedPredictRealWorldEx
             self.analyse_validation_groups(
                 system_name=system_name,
                 validation_sets=[
-                    set(random_state.choice(euroc_sets, 2, replace=False)) |
-                    set(random_state.choice(kitti_sets, 2, replace=False))
+                    set(random_state.choice(euroc_sets, 3, replace=False))
                     for _ in range(10)],
-                output_folder=os.path.join(type(self).get_output_folder(), system_name, 'one from each domain'),
-                db_client=db_client,
-                results_cache=results_cache
-            )
-            # In the second set, we want to test cross domain evaluation by excluding entire datasets as validation
-            self.analyse_validation_groups(
-                system_name=system_name,
-                validation_sets=[set(euroc_sets), set(kitti_sets)],
-                output_folder=os.path.join(type(self).get_output_folder(), system_name, 'cross domain'),
+                output_folder=os.path.join(type(self).get_output_folder(), system_name),
                 db_client=db_client,
                 results_cache=results_cache
             )
