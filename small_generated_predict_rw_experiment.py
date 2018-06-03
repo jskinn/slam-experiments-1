@@ -220,7 +220,7 @@ class SmallGeneratedPredictRealWorldExperiment(bgprwe.BaseGeneratedPredictRealWo
                 set(random_state.choice(euroc_sets, 2, replace=False)) |
                 set(random_state.choice(tum_sets, 2, replace=False))
                 for _ in range(10)],
-            output_folder=os.path.join(type(self).get_output_folder(), 'ORBSLAM monocular'),
+            output_folder=os.path.join(type(self).get_output_folder(), 'ORBSLAM2 monocular'),
             db_client=db_client,
             results_cache=results_cache
         )
@@ -245,7 +245,7 @@ class SmallGeneratedPredictRealWorldExperiment(bgprwe.BaseGeneratedPredictRealWo
             validation_sets=[
                 set(random_state.choice(tum_sets, 3, replace=False))
                 for _ in range(10)],
-            output_folder=os.path.join(type(self).get_output_folder(), 'ORBSLAM rgbd'),
+            output_folder=os.path.join(type(self).get_output_folder(), 'ORBSLAM2 rgbd'),
             db_client=db_client,
             results_cache=results_cache
         )

@@ -742,8 +742,8 @@ def create_distribution_plots(system_name: str, group_name, errors_by_quality: t
             figure.suptitle(title)
             pyplot.tight_layout()
             pyplot.subplots_adjust(top=0.95, right=0.99)
-            figure.savefig(os.path.join(output_folder, title + '.png'))
-            figure.savefig(os.path.join(output_folder, title + '.svg'))
+            figure.savefig(os.path.join(output_folder, title.replace(' ', '_') + '.png'))
+            figure.savefig(os.path.join(output_folder, title.replace(' ', '_') + '.svg'))
             pyplot.close(figure)
 
         # Re-compute the figure zoomed in
@@ -776,8 +776,8 @@ def create_distribution_plots(system_name: str, group_name, errors_by_quality: t
                 figure.suptitle(title + ' central 3 standard deviations')
                 pyplot.tight_layout()
                 pyplot.subplots_adjust(top=0.95, right=0.99)
-                figure.savefig(os.path.join(output_folder, title + '_zoomed.png'))
-                figure.savefig(os.path.join(output_folder, title + '_zoomed.svg'))
+                figure.savefig(os.path.join(output_folder, title.replace(' ', '_') + '_zoomed.png'))
+                figure.savefig(os.path.join(output_folder, title.replace(' ', '_') + '_zoomed.svg'))
                 pyplot.close(figure)
 
 
@@ -851,14 +851,14 @@ def create_boxplot(title: str, dataframe, column: str, output_folder: str, units
     figure.suptitle(title)
     pyplot.tight_layout()
     pyplot.subplots_adjust(top=0.95, right=0.99)
-    figure.savefig(os.path.join(output_folder, title + '.png'))
-    figure.savefig(os.path.join(output_folder, title + '.svg'))
+    figure.savefig(os.path.join(output_folder, title.replace(' ', '_') + '.png'))
+    figure.savefig(os.path.join(output_folder, title.replace(' ', '_') + '.svg'))
 
     # Re-save the figure zoomed in
     if also_zoom:
         ax.set_ylim(bottom=0, top=3 * np.std(dataframe[column].values))
-        figure.savefig(os.path.join(output_folder, title + '_zoomed.png'))
-        figure.savefig(os.path.join(output_folder, title + '_zoomed.svg'))
+        figure.savefig(os.path.join(output_folder, title.replace(' ', '_') + '_zoomed.png'))
+        figure.savefig(os.path.join(output_folder, title.replace(' ', '_') + '_zoomed.svg'))
     pyplot.close(figure)
 
 
@@ -882,8 +882,8 @@ def create_histogram(title: str, dataframe, column: str, output_folder: str, uni
         figure.suptitle(title)
         pyplot.tight_layout()
         pyplot.subplots_adjust(top=0.95, right=0.99)
-        figure.savefig(os.path.join(output_folder, title + '.png'))
-        figure.savefig(os.path.join(output_folder, title + '.svg'))
+        figure.savefig(os.path.join(output_folder, title.replace(' ', '_') + '.png'))
+        figure.savefig(os.path.join(output_folder, title.replace(' ', '_') + '.svg'))
         pyplot.close(figure)
 
     # Re-save the figure zoomed in
@@ -906,6 +906,6 @@ def create_histogram(title: str, dataframe, column: str, output_folder: str, uni
             figure.suptitle(title + ' central 3 standard deviations')
             pyplot.tight_layout()
             pyplot.subplots_adjust(top=0.95, right=0.99)
-            figure.savefig(os.path.join(output_folder, title + '_zoomed.png'))
-            figure.savefig(os.path.join(output_folder, title + '_zoomed.svg'))
+            figure.savefig(os.path.join(output_folder, title.replace(' ', '_') + '_zoomed.png'))
+            figure.savefig(os.path.join(output_folder, title.replace(' ', '_') + '_zoomed.svg'))
             pyplot.close(figure)
