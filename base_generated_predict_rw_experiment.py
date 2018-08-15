@@ -274,6 +274,12 @@ class BaseGeneratedPredictRealWorldExperiment(arvet.batch_analysis.experiment.Ex
             output_folder=output_folder,
             also_zoom=True
         )
+        create_tracking_plot(
+            system_name=system_name,
+            group_name='all data',
+            errors_by_quality=all_errors_by_quality,
+            output_folder=output_folder,
+        )
 
     def analyse_validation_groups(self, system_name: str, validation_sets: typing.Iterable[typing.Set[str]],
                                   output_folder: str, db_client: arvet.database.client.DatabaseClient,
@@ -677,7 +683,7 @@ def predict_classification(data, target_data) -> typing.List[typing.Tuple[float,
     return list(zip(predict_y, val_y))
 
 
-def create_distribution_plots(system_name: str, group_name, errors_by_quality: typing.Mapping[str, np.ndarray],
+def create_distribution_plots(system_name: str, group_name: str, errors_by_quality: typing.Mapping[str, np.ndarray],
                               output_folder: str, also_zoom: bool = False):
     import matplotlib.pyplot as pyplot
     from scipy.stats import ks_2samp
@@ -767,10 +773,42 @@ def create_distribution_plots(system_name: str, group_name, errors_by_quality: t
 
                 figure.suptitle(title + ' central 3 standard deviations ({0} outliers)'.format(outliers))
                 pyplot.tight_layout()
-                pyplot.subplots_adjust(top=0.95, right=0.99)
+                pyplot.subplots_adjust(top=0.90, right=0.99)
                 figure.savefig(os.path.join(output_folder, title.replace(' ', '_') + '_zoomed.png'))
                 figure.savefig(os.path.join(output_folder, title.replace(' ', '_') + '_zoomed.svg'))
                 pyplot.close(figure)
+
+
+def create_tracking_plot(system_name: str, group_name: str, errors_by_quality: typing.Mapping[str, np.ndarray],
+                         output_folder: str):
+    import matplotlib.pyplot as pyplot
+
+    scores = []
+    for quality_name, errors in errors_by_quality.items():
+        error = errors[:, 12]
+        if len(error) > 0:
+            score = np.sum(error) / len(error)
+            scores.append((score, quality_name))
+
+    if len(scores) > 0:
+        scores = sorted(scores)
+
+        for score, quality_name in scores:
+            logging.getLogger(__name__).info("RESULT - Tracking probability for {0}: {1}".format(quality_name, score))
+
+        title = "{0} on {1} tracking probability".format(system_name, group_name)
+        figure, ax = pyplot.subplots(1, 1, figsize=(5, 5), dpi=80)
+        ax.bar(list(range(len(scores))), [score[0] for score in scores])
+        ax.set_xticks(list(range(len(scores))))
+        ax.set_xticklabels([score[1] for score in scores])
+        ax.set_ylabel('probability')
+
+        figure.suptitle(title)
+        pyplot.tight_layout()
+        pyplot.subplots_adjust(top=0.95, right=0.99)
+        figure.savefig(os.path.join(output_folder, title.replace(' ', '_') + '.png'))
+        figure.savefig(os.path.join(output_folder, title.replace(' ', '_') + '.svg'))
+        pyplot.close(figure)
 
 
 def create_errors_plots(indexes_and_names: typing.List[typing.Tuple[int, str, str]],
