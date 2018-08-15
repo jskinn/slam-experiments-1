@@ -255,17 +255,11 @@ class BaseGeneratedPredictRealWorldExperiment(arvet.batch_analysis.experiment.Ex
             else:
                 all_errors_by_quality['Real World'] = np.vstack((all_errors_by_quality['Real World'], errors))
 
-            errors_by_quality = {'Real World': errors}
-            for world_name, quality_map in trajectory_group.generated_datasets.items():
+            for quality_map in trajectory_group.generated_datasets.values():
                 for quality_name, dataset_id in quality_map.items():
                     result_id = self.get_benchmark_result(system_id, dataset_id, self.benchmarks['Estimate Errors'])
                     if result_id is not None:
                         _, errors = collect_errors_and_input({result_id}, db_client, results_cache)
-
-                        if quality_name not in errors_by_quality:
-                            errors_by_quality[quality_name] = errors
-                        else:
-                            errors_by_quality[quality_name] = np.vstack((errors_by_quality[quality_name], errors))
 
                         if quality_name not in all_errors_by_quality:
                             all_errors_by_quality[quality_name] = errors
@@ -273,13 +267,6 @@ class BaseGeneratedPredictRealWorldExperiment(arvet.batch_analysis.experiment.Ex
                             all_errors_by_quality[quality_name] = np.vstack(
                                 (all_errors_by_quality[quality_name], errors))
 
-            create_distribution_plots(
-                system_name=system_name,
-                group_name=trajectory_group.name,
-                errors_by_quality=errors_by_quality,
-                output_folder=output_folder,
-                also_zoom=True
-            )
         create_distribution_plots(
             system_name=system_name,
             group_name='all data',
@@ -710,15 +697,18 @@ def create_distribution_plots(system_name: str, group_name, errors_by_quality: t
         (lambda errs: errs[:, 11], 'rotational noise', 'rad', (0, np.pi))
     ]:
         title = "{0} on {1} {2} distribution".format(system_name, group_name, error_name)
-        max_std = -1
+        max_mad = -1
         rw_error = get_error(errors_by_quality['Real World'])
         show = False
         figure, ax = pyplot.subplots(1, 1, figsize=(12, 10), dpi=80)
         for quality_name, errors in errors_by_quality.items():
             error = get_error(errors)
-            std = np.std(error)
-            if std > max_std:
-                max_std = std
+
+            # Find the maximum median deviation for zooming. We use median rather than mean for outlier robustness
+            mad = np.median(np.abs(error - np.mean(error)))
+            if mad > max_mad:
+                max_mad = mad
+
             if len(error) > 0 and np.max(error) > np.min(error):
                 show = True
                 ks_stat, ks_pval = ks_2samp(error, rw_error)
@@ -748,19 +738,21 @@ def create_distribution_plots(system_name: str, group_name, errors_by_quality: t
 
         # Re-compute the figure zoomed in
         if also_zoom and (bounds[0] is None or bounds[1] is None):
-            zoom_min = -3 * max_std if bounds[0] is None else bounds[0]
-            zoom_max = 3 * max_std if bounds[1] is None else bounds[1]
+            zoom_min = -3 * max_mad if bounds[0] is None else bounds[0]
+            zoom_max = 3 * max_mad if bounds[1] is None else bounds[1]
 
             show = False
+            outliers = 0
             figure, ax = pyplot.subplots(1, 1, figsize=(12, 10), dpi=80)
             for quality_name, errors in errors_by_quality.items():
                 error = get_error(errors)
-                error = error[np.where((error != np.nan) * (error > zoom_min) * (error < zoom_max))]
-                if len(error) > 0 and np.max(error) > np.min(error):
+                middle_error = error[np.where((error != np.nan) * (error > zoom_min) * (error < zoom_max))]
+                outliers += len(error) - len(middle_error)
+                if len(middle_error) > 0 and np.max(middle_error) > np.min(middle_error):
                     show = True
-                    ks_stat, ks_pval = ks_2samp(error, rw_error)
+                    ks_stat, ks_pval = ks_2samp(middle_error, rw_error)
                     ax.hist(
-                        error,
+                        middle_error,
                         label=quality_name + " (ks score: {0:.3f}, pval: {1:.3f})".format(ks_stat, ks_pval)
                         if not quality_name == 'Real World' else quality_name,
                         density=True,
@@ -773,7 +765,7 @@ def create_distribution_plots(system_name: str, group_name, errors_by_quality: t
                 ax.set_ylabel('frequency')
                 ax.legend()
 
-                figure.suptitle(title + ' central 3 standard deviations')
+                figure.suptitle(title + ' central 3 standard deviations ({0} outliers)'.format(outliers))
                 pyplot.tight_layout()
                 pyplot.subplots_adjust(top=0.95, right=0.99)
                 figure.savefig(os.path.join(output_folder, title.replace(' ', '_') + '_zoomed.png'))
