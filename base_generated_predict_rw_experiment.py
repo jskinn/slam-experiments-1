@@ -328,16 +328,16 @@ class BaseGeneratedPredictRealWorldExperiment(arvet.batch_analysis.experiment.Ex
         os.makedirs(output_folder, exist_ok=True)
         create_errors_plots(
             indexes_and_names=[
-                (0, '{0} forward error'.format(system_name), 'm'),
-                (1, '{0} sideways error'.format(system_name), 'm'),
-                (2, '{0} vertical error'.format(system_name), 'm'),
-                (3, '{0} translational error length'.format(system_name), 'm'),
-                (5, '{0} rotational error'.format(system_name), 'radians'),
-                (6, '{0} forward noise'.format(system_name), 'm'),
-                (7, '{0} sideways noise'.format(system_name), 'm'),
-                (8, '{0} vertical noise'.format(system_name), 'm'),
-                (9, '{0} translational noise length'.format(system_name), 'm'),
-                (11, '{0} rotational noise'.format(system_name), 'rad')
+                (0, '{0} forward accuracy'.format(system_name), 'm'),
+                (1, '{0} sideways accuracy'.format(system_name), 'm'),
+                (2, '{0} vertical accuracy'.format(system_name), 'm'),
+                (3, '{0} translational accuracy length'.format(system_name), 'm'),
+                (5, '{0} rotational accuracy'.format(system_name), 'radians'),
+                (6, '{0} forward precision'.format(system_name), 'm'),
+                (7, '{0} sideways precision'.format(system_name), 'm'),
+                (8, '{0} vertical precision'.format(system_name), 'm'),
+                (9, '{0} translational precision length'.format(system_name), 'm'),
+                (11, '{0} rotational precision'.format(system_name), 'rad')
             ],
             group_predictions=group_predictions,
             output_folder=output_folder
@@ -689,18 +689,18 @@ def create_distribution_plots(system_name: str, group_name: str, errors_by_quali
     from scipy.stats import ks_2samp
 
     for get_error, error_name, units, bounds in [
-        (lambda errs: errs[:, 0], 'forward error', 'm', (None, None)),
-        (lambda errs: errs[:, 1], 'sideways error', 'm', (None, None)),
-        (lambda errs: errs[:, 2], 'vertical error', 'm', (None, None)),
-        (lambda errs: errs[:, 3], 'translational error length', 'm', (0, None)),
-        (lambda errs: 1 / (1 + errs[:, 3]), 'inverse translational error length', 'm', (0, 1)),
-        (lambda errs: errs[:, 5], 'rotational error', 'radians', (0, np.pi)),
-        (lambda errs: errs[:, 6], 'forward noise', 'm', (None, None)),
-        (lambda errs: errs[:, 7], 'sideways noise', 'm', (None, None)),
-        (lambda errs: errs[:, 8], 'vertical noise', 'm', (None, None)),
-        (lambda errs: errs[:, 9], 'translational noise length', 'm', (0, None)),
-        (lambda errs: 1 / (1 + errs[:, 9]), 'inverse translational noise length', 'm', (0, 1)),
-        (lambda errs: errs[:, 11], 'rotational noise', 'rad', (0, np.pi))
+        (lambda errs: errs[:, 0], 'forward accuracy', 'm', (None, None)),
+        (lambda errs: errs[:, 1], 'sideways accuracy', 'm', (None, None)),
+        (lambda errs: errs[:, 2], 'vertical accuracy', 'm', (None, None)),
+        (lambda errs: errs[:, 3], 'translational accuracy', 'm', (0, None)),
+        (lambda errs: 1 / (1 + errs[:, 3]), 'inverse translational accuracy', 'm', (0, 1)),
+        (lambda errs: errs[:, 5], 'rotational accuracy', 'radians', (0, np.pi)),
+        (lambda errs: errs[:, 6], 'forward precision', 'm', (None, None)),
+        (lambda errs: errs[:, 7], 'sideways precision', 'm', (None, None)),
+        (lambda errs: errs[:, 8], 'vertical precision', 'm', (None, None)),
+        (lambda errs: errs[:, 9], 'translational precision', 'm', (0, None)),
+        (lambda errs: 1 / (1 + errs[:, 9]), 'inverse translational precision', 'm', (0, 1)),
+        (lambda errs: errs[:, 11], 'rotational precision', 'rad', (0, np.pi))
     ]:
         title = "{0} on {1} {2} distribution".format(system_name, group_name, error_name)
         max_mad = -1
