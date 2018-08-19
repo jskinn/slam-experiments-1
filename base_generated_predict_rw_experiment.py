@@ -328,16 +328,16 @@ class BaseGeneratedPredictRealWorldExperiment(arvet.batch_analysis.experiment.Ex
         os.makedirs(output_folder, exist_ok=True)
         create_errors_plots(
             indexes_and_names=[
-                (0, '{0} forward error'.format(system_name), 'm'),
-                (1, '{0} sideways error'.format(system_name), 'm'),
-                (2, '{0} vertical error'.format(system_name), 'm'),
-                (3, '{0} translational error length'.format(system_name), 'm'),
-                (5, '{0} rotational error'.format(system_name), 'radians'),
-                (6, '{0} forward noise'.format(system_name), 'm'),
-                (7, '{0} sideways noise'.format(system_name), 'm'),
-                (8, '{0} vertical noise'.format(system_name), 'm'),
-                (9, '{0} translational noise length'.format(system_name), 'm'),
-                (11, '{0} rotational noise'.format(system_name), 'rad')
+                (0, '{0} forward accuracy'.format(system_name), 'm'),
+                (1, '{0} sideways accuracy'.format(system_name), 'm'),
+                (2, '{0} vertical accuracy'.format(system_name), 'm'),
+                (3, '{0} translational accuracy length'.format(system_name), 'm'),
+                (5, '{0} rotational accuracy'.format(system_name), 'radians'),
+                (6, '{0} forward precision'.format(system_name), 'm'),
+                (7, '{0} sideways precicion'.format(system_name), 'm'),
+                (8, '{0} vertical precsion'.format(system_name), 'm'),
+                (9, '{0} translational precision length'.format(system_name), 'm'),
+                (11, '{0} rotational precision'.format(system_name), 'rad')
             ],
             group_predictions=group_predictions,
             output_folder=output_folder
@@ -689,18 +689,18 @@ def create_distribution_plots(system_name: str, group_name: str, errors_by_quali
     from scipy.stats import ks_2samp
 
     for get_error, error_name, units, bounds in [
-        (lambda errs: errs[:, 0], 'forward error', 'm', (None, None)),
-        (lambda errs: errs[:, 1], 'sideways error', 'm', (None, None)),
-        (lambda errs: errs[:, 2], 'vertical error', 'm', (None, None)),
-        (lambda errs: errs[:, 3], 'translational error length', 'm', (0, None)),
-        (lambda errs: 1 / (1 + errs[:, 3]), 'inverse translational error length', 'm', (0, 1)),
-        (lambda errs: errs[:, 5], 'rotational error', 'radians', (0, np.pi)),
-        (lambda errs: errs[:, 6], 'forward noise', 'm', (None, None)),
-        (lambda errs: errs[:, 7], 'sideways noise', 'm', (None, None)),
-        (lambda errs: errs[:, 8], 'vertical noise', 'm', (None, None)),
-        (lambda errs: errs[:, 9], 'translational noise length', 'm', (0, None)),
-        (lambda errs: 1 / (1 + errs[:, 9]), 'inverse translational noise length', 'm', (0, 1)),
-        (lambda errs: errs[:, 11], 'rotational noise', 'rad', (0, np.pi))
+        (lambda errs: errs[:, 0], 'forward accuracy', 'm', (None, None)),
+        (lambda errs: errs[:, 1], 'sideways accuracy', 'm', (None, None)),
+        (lambda errs: errs[:, 2], 'vertical accuracy', 'm', (None, None)),
+        (lambda errs: errs[:, 3], 'translational accuracy length', 'm', (0, None)),
+        (lambda errs: 1 / (1 + errs[:, 3]), 'inverse translational accuracy length', 'm', (0, 1)),
+        (lambda errs: errs[:, 5], 'rotational accuracy', 'radians', (0, np.pi)),
+        (lambda errs: errs[:, 6], 'forward precision', 'm', (None, None)),
+        (lambda errs: errs[:, 7], 'sideways precision', 'm', (None, None)),
+        (lambda errs: errs[:, 8], 'vertical precision', 'm', (None, None)),
+        (lambda errs: errs[:, 9], 'translational precision length', 'm', (0, None)),
+        (lambda errs: 1 / (1 + errs[:, 9]), 'inverse translational precision length', 'm', (0, 1)),
+        (lambda errs: errs[:, 11], 'rotational precision', 'rad', (0, np.pi))
     ]:
         title = "{0} on {1} {2} distribution".format(system_name, group_name, error_name)
         max_mad = -1
@@ -717,11 +717,14 @@ def create_distribution_plots(system_name: str, group_name: str, errors_by_quali
 
             if len(error) > 0 and np.max(error) > np.min(error):
                 show = True
-                ks_stat, ks_pval = ks_2samp(error, rw_error)
+                if quality_name == 'Real World':
+                    label = "{0} ({1} samples)".format(quality_name, len(error))
+                else:
+                    ks_stat, ks_pval = ks_2samp(error, rw_error)
+                    label = "{0} ({1} samples, ks score: {2:.3f})".format(quality_name, len(error), ks_stat)
                 ax.hist(
                     error,
-                    label=quality_name + " (ks score: {0:.3f}, pval: {1:.3f})".format(ks_stat, ks_pval)
-                    if not quality_name == 'Real World' else quality_name,
+                    label=label,
                     density=True,
                     bins=1000,
                     alpha=0.5
@@ -731,7 +734,7 @@ def create_distribution_plots(system_name: str, group_name: str, errors_by_quali
                 ax.set_xlim(left=bounds[0])
             if bounds[1] is not None:
                 ax.set_xlim(right=bounds[1])
-            ax.set_xlabel('Absolute Error ({0})'.format(units))
+            ax.set_xlabel('{0} ({1})'.format(error_name, units))
             ax.set_ylabel('frequency')
             ax.legend()
 
@@ -748,30 +751,34 @@ def create_distribution_plots(system_name: str, group_name: str, errors_by_quali
             zoom_max = 3 * max_mad if bounds[1] is None else bounds[1]
 
             show = False
-            outliers = 0
             figure, ax = pyplot.subplots(1, 1, figsize=(12, 10), dpi=80)
             for quality_name, errors in errors_by_quality.items():
                 error = get_error(errors)
                 middle_error = error[np.where((error != np.nan) * (error > zoom_min) * (error < zoom_max))]
-                outliers += len(error) - len(middle_error)
                 if len(middle_error) > 0 and np.max(middle_error) > np.min(middle_error):
                     show = True
-                    ks_stat, ks_pval = ks_2samp(middle_error, rw_error)
+                    if quality_name == 'Real World':
+                        label = "{0} ({1} samples, {2} outliers)".format(quality_name, len(middle_error),
+                                                                         len(error) - len(middle_error))
+                    else:
+                        # Make sure we calculate the ks statistic between the full errors
+                        ks_stat, ks_pval = ks_2samp(error, rw_error)
+                        label = "{0} ({1} samples, {2} outliers, ks score: {3:.3f})".format(
+                            quality_name, len(middle_error), len(error) - len(middle_error), ks_stat)
                     ax.hist(
                         middle_error,
-                        label=quality_name + " (ks score: {0:.3f}, pval: {1:.3f})".format(ks_stat, ks_pval)
-                        if not quality_name == 'Real World' else quality_name,
+                        label=label,
                         density=True,
                         bins=1000,
                         alpha=0.5
                     )
             if show:
                 ax.set_xlim(left=zoom_min, right=zoom_max)
-                ax.set_xlabel('Absolute Error ({0})'.format(units))
+                ax.set_xlabel('{0} ({1})'.format(error_name, units))
                 ax.set_ylabel('frequency')
                 ax.legend()
 
-                figure.suptitle(title + ' central 3 standard deviations ({0} outliers)'.format(outliers))
+                figure.suptitle(title)
                 pyplot.tight_layout()
                 pyplot.subplots_adjust(top=0.90, right=0.99)
                 figure.savefig(os.path.join(output_folder, title.replace(' ', '_') + '_zoomed.png'))
