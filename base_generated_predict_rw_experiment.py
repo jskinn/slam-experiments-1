@@ -717,11 +717,14 @@ def create_distribution_plots(system_name: str, group_name: str, errors_by_quali
 
             if len(error) > 0 and np.max(error) > np.min(error):
                 show = True
-                ks_stat, ks_pval = ks_2samp(error, rw_error)
+                if quality_name == 'Real World':
+                    label = "{0} ({1} samples)".format(quality_name, len(error))
+                else:
+                    ks_stat, ks_pval = ks_2samp(error, rw_error)
+                    label = "{0} ({1} samples, ks score: {2:.3f})".format(quality_name, len(error), ks_stat)
                 ax.hist(
                     error,
-                    label=quality_name + " (ks score: {0:.3f}, pval: {1:.3f})".format(ks_stat, ks_pval)
-                    if not quality_name == 'Real World' else quality_name,
+                    label=label,
                     density=True,
                     bins=1000,
                     alpha=0.5
@@ -743,35 +746,39 @@ def create_distribution_plots(system_name: str, group_name: str, errors_by_quali
             pyplot.close(figure)
 
         # Re-compute the figure zoomed in
-        if also_zoom and (bounds[0] is None or bounds[1] is None):
-            zoom_min = -3 * max_mad if bounds[0] is None else bounds[0]
-            zoom_max = 3 * max_mad if bounds[1] is None else bounds[1]
+        if also_zoom:
+            zoom_min = -3 * max_mad if bounds[0] is None else max(-3 * max_mad, bounds[0])
+            zoom_max = 3 * max_mad if bounds[1] is None else min(3 * max_mad, bounds[1])
 
             show = False
-            outliers = 0
             figure, ax = pyplot.subplots(1, 1, figsize=(12, 10), dpi=80)
             for quality_name, errors in errors_by_quality.items():
                 error = get_error(errors)
                 middle_error = error[np.where((error != np.nan) * (error > zoom_min) * (error < zoom_max))]
-                outliers += len(error) - len(middle_error)
                 if len(middle_error) > 0 and np.max(middle_error) > np.min(middle_error):
                     show = True
-                    ks_stat, ks_pval = ks_2samp(middle_error, rw_error)
+                    if quality_name == 'Real World':
+                        label = "{0} ({1} samples, {2} outliers)".format(quality_name, len(middle_error),
+                                                                         len(error) - len(middle_error))
+                    else:
+                        # Make sure we calculate the ks statistic between the full errors
+                        ks_stat, ks_pval = ks_2samp(error, rw_error)
+                        label = "{0} ({1} samples, {2} outliers, ks score: {3:.3f})".format(
+                            quality_name, len(middle_error), len(error) - len(middle_error), ks_stat)
                     ax.hist(
                         middle_error,
-                        label=quality_name + " (ks score: {0:.3f}, pval: {1:.3f})".format(ks_stat, ks_pval)
-                        if not quality_name == 'Real World' else quality_name,
+                        label=label,
                         density=True,
                         bins=1000,
                         alpha=0.5
                     )
             if show:
                 ax.set_xlim(left=zoom_min, right=zoom_max)
-                ax.set_xlabel('Absolute Error ({0})'.format(units))
+                ax.set_xlabel('{0} ({1})'.format(error_name, units))
                 ax.set_ylabel('frequency')
                 ax.legend()
 
-                figure.suptitle(title + ' central 3 standard deviations ({0} outliers)'.format(outliers))
+                figure.suptitle(title)
                 pyplot.tight_layout()
                 pyplot.subplots_adjust(top=0.90, right=0.99)
                 figure.savefig(os.path.join(output_folder, title.replace(' ', '_') + '_zoomed.png'))
