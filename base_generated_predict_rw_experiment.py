@@ -746,9 +746,9 @@ def create_distribution_plots(system_name: str, group_name: str, errors_by_quali
             pyplot.close(figure)
 
         # Re-compute the figure zoomed in
-        if also_zoom and (bounds[0] is None or bounds[1] is None):
-            zoom_min = -3 * max_mad if bounds[0] is None else bounds[0]
-            zoom_max = 3 * max_mad if bounds[1] is None else bounds[1]
+        if also_zoom:
+            zoom_min = -3 * max_mad if bounds[0] is None else max(-3 * max_mad, bounds[0])
+            zoom_max = 3 * max_mad if bounds[1] is None else min(3 * max_mad, bounds[1])
 
             show = False
             figure, ax = pyplot.subplots(1, 1, figsize=(12, 10), dpi=80)
