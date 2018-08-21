@@ -248,7 +248,7 @@ class BaseGeneratedPredictRealWorldExperiment(arvet.batch_analysis.experiment.Ex
                                                   self.benchmarks['Estimate Errors'])
             if result_id is None:
                 continue
-            _, errors = collect_errors_and_input({result_id}, db_client, results_cache)
+            errors = collect_all_behaviour({result_id}, db_client, results_cache)
 
             if 'Real World' not in all_errors_by_quality:
                 all_errors_by_quality['Real World'] = errors
@@ -259,7 +259,7 @@ class BaseGeneratedPredictRealWorldExperiment(arvet.batch_analysis.experiment.Ex
                 for quality_name, dataset_id in quality_map.items():
                     result_id = self.get_benchmark_result(system_id, dataset_id, self.benchmarks['Estimate Errors'])
                     if result_id is not None:
-                        _, errors = collect_errors_and_input({result_id}, db_client, results_cache)
+                        errors = collect_all_behaviour({result_id}, db_client, results_cache)
 
                         if quality_name not in all_errors_by_quality:
                             all_errors_by_quality[quality_name] = errors
@@ -271,8 +271,7 @@ class BaseGeneratedPredictRealWorldExperiment(arvet.batch_analysis.experiment.Ex
             system_name=system_name,
             group_name='all data',
             errors_by_quality=all_errors_by_quality,
-            output_folder=output_folder,
-            also_zoom=True
+            output_folder=output_folder
         )
         create_tracking_plot(
             system_name=system_name,
@@ -512,6 +511,30 @@ def collect_errors_and_input(result_ids: typing.Iterable[bson.ObjectId],
     return np.array(collected_characteristics), np.array(collected_errors)
 
 
+def collect_all_behaviour(result_ids: typing.Iterable[bson.ObjectId],
+                          db_client: arvet.database.client.DatabaseClient,
+                          results_cache: dict):
+    """
+    Collect together error observations from a given set of result ids
+    :param result_ids:
+    :param db_client:
+    :param results_cache:
+    :return:
+    """
+    # Add the results we don't already have to the results cache
+    result_ids = set(result_ids)
+    results = dh.load_many_objects(db_client, db_client.results_collection, result_ids - set(results_cache.keys()))
+    for result in results:
+        results_cache[result.identifier] = result.observations
+
+    # Then pull the errors from the cache
+    collected_behaviour = []
+    for result_id in result_ids:
+        # Take all the behaviour characteristics together
+        collected_behaviour += results_cache[result_id].tolist()
+    return np.array(collected_behaviour)
+
+
 def predict_real_and_virtual_errors(validation_results: typing.Iterable[bson.ObjectId],
                                     real_world_results: typing.Iterable[bson.ObjectId],
                                     virtual_results_by_quality: typing.Mapping[
@@ -683,59 +706,91 @@ def predict_classification(data, target_data) -> typing.List[typing.Tuple[float,
     return list(zip(predict_y, val_y))
 
 
+QUALITY_NAME_COLOURS = {
+    'real world': (0, 0, 0),
+    'max quality': (241 / 255, 163 / 255, 64 / 255),
+    'min quality': (0, 109 / 255, 219 / 255),
+}
+
+
 def create_distribution_plots(system_name: str, group_name: str, errors_by_quality: typing.Mapping[str, np.ndarray],
-                              output_folder: str, also_zoom: bool = False):
+                              output_folder: str):
     import matplotlib.pyplot as pyplot
     from scipy.stats import ks_2samp
 
-    for get_error, error_name, units, bounds in [
-        (lambda errs: errs[:, 0], 'forward accuracy', 'm', (None, None)),
-        (lambda errs: errs[:, 1], 'sideways accuracy', 'm', (None, None)),
-        (lambda errs: errs[:, 2], 'vertical accuracy', 'm', (None, None)),
-        (lambda errs: errs[:, 3], 'translational accuracy', 'm', (0, None)),
-        (lambda errs: 1 / (1 + errs[:, 3]), 'inverse translational accuracy', 'm', (0, 1)),
-        (lambda errs: errs[:, 5], 'rotational accuracy', 'radians', (0, np.pi)),
-        (lambda errs: errs[:, 6], 'forward precision', 'm', (None, None)),
-        (lambda errs: errs[:, 7], 'sideways precision', 'm', (None, None)),
-        (lambda errs: errs[:, 8], 'vertical precision', 'm', (None, None)),
-        (lambda errs: errs[:, 9], 'translational precision', 'm', (0, None)),
-        (lambda errs: 1 / (1 + errs[:, 9]), 'inverse translational precision', 'm', (0, 1)),
-        (lambda errs: errs[:, 11], 'rotational precision', 'rad', (0, np.pi)),
-        (lambda errs: errs[:, 14], 'feature count', None, (0, None)),
-        (lambda errs: errs[:, 15], 'feature matches', None, (0, None))
+    for get_error, error_name, units, is_integer, bounds in [
+        # (lambda errs: errs[:, 0], 'forward accuracy', 'm', (None, None)),
+        # (lambda errs: errs[:, 1], 'sideways accuracy', 'm', (None, None)),
+        # (lambda errs: errs[:, 2], 'vertical accuracy', 'm', (None, None)),
+        (lambda errs: errs[:, 3], 'translational accuracy', 'm', False, (0, None)),
+        # (lambda errs: 1 / (1 + errs[:, 3]), 'inverse translational accuracy', 'm', (0, 1)),
+        (lambda errs: errs[:, 5], 'rotational accuracy', 'radians', False, (0, np.pi)),
+        # (lambda errs: errs[:, 6], 'forward precision', 'm', (None, None)),
+        # (lambda errs: errs[:, 7], 'sideways precision', 'm', (None, None)),
+        # (lambda errs: errs[:, 8], 'vertical precision', 'm', (None, None)),
+        (lambda errs: errs[:, 9], 'translational precision', 'm', False, (0, None)),
+        # (lambda errs: 1 / (1 + errs[:, 9]), 'inverse translational precision', 'm', (0, 1)),
+        (lambda errs: errs[:, 11], 'rotational precision', 'rad', False, (0, np.pi)),
+        (lambda errs: errs[:, 13], 'feature count', None, True, (0, None)),
+        (lambda errs: errs[:, 14], 'feature matches', None, True, (0, None))
     ]:
         title = "{0} on {1} {2} distribution".format(system_name, group_name, error_name)
-        max_mad = -1
-        rw_error = get_error(errors_by_quality['Real World'])
-        show = False
-        figure, ax = pyplot.subplots(1, 1, figsize=(12, 10), dpi=80)
-        for quality_name, errors in errors_by_quality.items():
-            error = get_error(errors)
 
-            # Find the maximum median deviation for zooming. We use median rather than mean for outlier robustness
+        rw_error = get_error(errors_by_quality['Real World'])
+        rw_error = rw_error[~np.isnan(rw_error)]
+
+        # First, find the zoom level based on the Median Absolute Difference
+        max_mad = -1
+        for quality_name, errors in errors_by_quality.items():
+            if quality_name == 'Real World':
+                error = rw_error
+            else:
+                error = get_error(errors)
+                error = error[~np.isnan(error)]
             mad = np.median(np.abs(error - np.mean(error)))
             if mad > max_mad:
                 max_mad = mad
 
-            if len(error) > 0 and np.max(error) > np.min(error):
+        if is_integer:
+            zoom_min = -4 * max_mad if bounds[0] is None else max(-3 * max_mad, bounds[0])
+            zoom_max = 4 * max_mad if bounds[1] is None else min(3 * max_mad, bounds[1])
+            bins = min(int(zoom_max - zoom_min), 1000)
+        else:
+            zoom_min = -3 * max_mad if bounds[0] is None else max(-3 * max_mad, bounds[0])
+            zoom_max = 3 * max_mad if bounds[1] is None else min(3 * max_mad, bounds[1])
+            bins = 1000
+        show = False
+        figure, ax = pyplot.subplots(1, 1, figsize=(12, 10), dpi=80)
+        for quality_name, errors in errors_by_quality.items():
+            if quality_name == 'Real World':
+                error = rw_error
+            else:
+                error = get_error(errors)
+                error = error[~np.isnan(error)]
+
+            middle_error = error[(error > zoom_min) * (error < zoom_max)]
+            if len(middle_error) > 0 and np.max(middle_error) > np.min(middle_error):
                 show = True
                 if quality_name == 'Real World':
-                    label = "{0} ({1} samples)".format(quality_name, len(error))
+                    label = "{0} ({1} samples, {2} outliers)".format(quality_name.lower(), len(middle_error),
+                                                                     len(error) - len(middle_error))
                 else:
+                    # Make sure we calculate the ks statistic between the full errors
                     ks_stat, ks_pval = ks_2samp(error, rw_error)
-                    label = "{0} ({1} samples, ks score: {2:.3f})".format(quality_name, len(error), ks_stat)
+                    label = "{0} ({1} samples, {2} outliers, ks score: {3:.3f})".format(
+                        quality_name.lower(), len(middle_error), len(error) - len(middle_error), ks_stat)
+                # Integer quantities can't be split into more bins than the range
                 ax.hist(
-                    error,
+                    middle_error,
                     label=label,
                     density=True,
-                    bins=1000,
-                    alpha=0.5
+                    bins=bins,
+                    alpha=0.5,
+                    color=QUALITY_NAME_COLOURS[quality_name.lower()]
                 )
         if show:
-            if bounds[0] is not None:
-                ax.set_xlim(left=bounds[0])
-            if bounds[1] is not None:
-                ax.set_xlim(right=bounds[1])
+            ax.set_xlim(left=zoom_min)
+            ax.set_xlim(right=zoom_max)
             if units:
                 ax.set_xlabel('{0} ({1})'.format(error_name, units))
             else:
@@ -749,49 +804,6 @@ def create_distribution_plots(system_name: str, group_name: str, errors_by_quali
             figure.savefig(os.path.join(output_folder, title.replace(' ', '_') + '.png'))
             figure.savefig(os.path.join(output_folder, title.replace(' ', '_') + '.svg'))
             pyplot.close(figure)
-
-        # Re-compute the figure zoomed in
-        if also_zoom:
-            zoom_min = -3 * max_mad if bounds[0] is None else max(-3 * max_mad, bounds[0])
-            zoom_max = 3 * max_mad if bounds[1] is None else min(3 * max_mad, bounds[1])
-
-            show = False
-            figure, ax = pyplot.subplots(1, 1, figsize=(12, 10), dpi=80)
-            for quality_name, errors in errors_by_quality.items():
-                error = get_error(errors)
-                middle_error = error[np.where((error != np.nan) * (error > zoom_min) * (error < zoom_max))]
-                if len(middle_error) > 0 and np.max(middle_error) > np.min(middle_error):
-                    show = True
-                    if quality_name == 'Real World':
-                        label = "{0} ({1} samples, {2} outliers)".format(quality_name, len(middle_error),
-                                                                         len(error) - len(middle_error))
-                    else:
-                        # Make sure we calculate the ks statistic between the full errors
-                        ks_stat, ks_pval = ks_2samp(error, rw_error)
-                        label = "{0} ({1} samples, {2} outliers, ks score: {3:.3f})".format(
-                            quality_name, len(middle_error), len(error) - len(middle_error), ks_stat)
-                    ax.hist(
-                        middle_error,
-                        label=label,
-                        density=True,
-                        bins=1000,
-                        alpha=0.5
-                    )
-            if show:
-                ax.set_xlim(left=zoom_min, right=zoom_max)
-                if units:
-                    ax.set_xlabel('{0} ({1})'.format(error_name, units))
-                else:
-                    ax.set_xlabel(error_name)
-                ax.set_ylabel('frequency')
-                ax.legend()
-
-                figure.suptitle(title)
-                pyplot.tight_layout()
-                pyplot.subplots_adjust(top=0.90, right=0.99)
-                figure.savefig(os.path.join(output_folder, title.replace(' ', '_') + '_zoomed.png'))
-                figure.savefig(os.path.join(output_folder, title.replace(' ', '_') + '_zoomed.svg'))
-                pyplot.close(figure)
 
 
 def create_tracking_plot(system_name: str, group_name: str, errors_by_quality: typing.Mapping[str, np.ndarray],
