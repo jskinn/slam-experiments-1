@@ -700,7 +700,9 @@ def create_distribution_plots(system_name: str, group_name: str, errors_by_quali
         (lambda errs: errs[:, 8], 'vertical precision', 'm', (None, None)),
         (lambda errs: errs[:, 9], 'translational precision', 'm', (0, None)),
         (lambda errs: 1 / (1 + errs[:, 9]), 'inverse translational precision', 'm', (0, 1)),
-        (lambda errs: errs[:, 11], 'rotational precision', 'rad', (0, np.pi))
+        (lambda errs: errs[:, 11], 'rotational precision', 'rad', (0, np.pi)),
+        (lambda errs: errs[:, 14], 'feature count', None, (0, None)),
+        (lambda errs: errs[:, 15], 'feature matches', None, (0, None))
     ]:
         title = "{0} on {1} {2} distribution".format(system_name, group_name, error_name)
         max_mad = -1
@@ -734,7 +736,10 @@ def create_distribution_plots(system_name: str, group_name: str, errors_by_quali
                 ax.set_xlim(left=bounds[0])
             if bounds[1] is not None:
                 ax.set_xlim(right=bounds[1])
-            ax.set_xlabel('Absolute Error ({0})'.format(units))
+            if units:
+                ax.set_xlabel('{0} ({1})'.format(error_name, units))
+            else:
+                ax.set_xlabel(error_name)
             ax.set_ylabel('frequency')
             ax.legend()
 
@@ -774,7 +779,10 @@ def create_distribution_plots(system_name: str, group_name: str, errors_by_quali
                     )
             if show:
                 ax.set_xlim(left=zoom_min, right=zoom_max)
-                ax.set_xlabel('{0} ({1})'.format(error_name, units))
+                if units:
+                    ax.set_xlabel('{0} ({1})'.format(error_name, units))
+                else:
+                    ax.set_xlabel(error_name)
                 ax.set_ylabel('frequency')
                 ax.legend()
 
@@ -804,6 +812,7 @@ def create_tracking_plot(system_name: str, group_name: str, errors_by_quality: t
             logging.getLogger(__name__).info("RESULT - Tracking probability for {0}: {1}".format(quality_name, score))
 
         title = "{0} on {1} tracking probability".format(system_name, group_name)
+
         figure, ax = pyplot.subplots(1, 1, figsize=(5, 5), dpi=80)
         ax.bar(list(range(len(scores))), [score[0] for score in scores])
         ax.set_xticks(list(range(len(scores))))
