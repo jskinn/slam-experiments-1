@@ -708,9 +708,18 @@ def predict_classification(data, target_data) -> typing.List[typing.Tuple[float,
 
 QUALITY_NAME_COLOURS = {
     'real world': (0, 0, 0),
-    'max quality': (241 / 255, 163 / 255, 64 / 255),
-    'min quality': (0, 109 / 255, 219 / 255),
+    'max quality': (255 / 255, 64 / 255, 0 / 255),
+    'min quality': (0, 0 / 255, 255 / 255),
 }
+
+
+def compute_zoom(all_data):
+    middle = np.median(all_data)
+    abs_diff = np.abs(all_data - middle)
+    all_data = all_data[abs_diff < 100 * np.median(abs_diff)]  # Remove ridiculous outliers
+    middle = np.mean(all_data)
+    std = np.std(all_data)
+    return np.max((np.min(all_data), middle - 3 * std)), np.min((np.max(all_data), middle + 3 * std))
 
 
 def create_distribution_plots(system_name: str, group_name: str, errors_by_quality: typing.Mapping[str, np.ndarray],
@@ -739,26 +748,20 @@ def create_distribution_plots(system_name: str, group_name: str, errors_by_quali
         rw_error = get_error(errors_by_quality['Real World'])
         rw_error = rw_error[~np.isnan(rw_error)]
 
-        # First, find the zoom level based on the Median Absolute Difference
-        max_mad = -1
-        for quality_name, errors in errors_by_quality.items():
-            if quality_name == 'Real World':
-                error = rw_error
-            else:
-                error = get_error(errors)
-                error = error[~np.isnan(error)]
-            mad = np.median(np.abs(error - np.mean(error)))
-            if mad > max_mad:
-                max_mad = mad
+        # First, from all the data, find the bounds of the graph
+        all_data = np.concatenate(tuple(get_error(errors) for errors in errors_by_quality.values()))
+        all_data = all_data[~np.isnan(all_data)]
+        if len(all_data) <= 0: # No data available for this graph, skip it
+            continue
+        zoom_min, zoom_max = compute_zoom(all_data)
+        del all_data
 
-        if is_integer:
-            zoom_min = -4 * max_mad if bounds[0] is None else max(-3 * max_mad, bounds[0])
-            zoom_max = 4 * max_mad if bounds[1] is None else min(3 * max_mad, bounds[1])
-            bins = min(int(zoom_max - zoom_min), 1000)
-        else:
-            zoom_min = -3 * max_mad if bounds[0] is None else max(-3 * max_mad, bounds[0])
-            zoom_max = 3 * max_mad if bounds[1] is None else min(3 * max_mad, bounds[1])
-            bins = 1000
+        if bounds[0] is not None:
+            zoom_min = max(zoom_min, bounds[0])
+        if bounds[1] is not None:
+            zoom_max = min(zoom_max, bounds[1])
+        bins = min(int(zoom_max - zoom_min), 1000) if is_integer else 1000
+
         show = False
         figure, ax = pyplot.subplots(1, 1, figsize=(12, 10), dpi=80)
         for quality_name, errors in errors_by_quality.items():
