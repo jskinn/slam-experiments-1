@@ -711,12 +711,16 @@ QUALITY_NAME_COLOURS = {
     'max quality': (255 / 255, 64 / 255, 0 / 255),
     'min quality': (0, 0 / 255, 255 / 255),
 }
+QUALITY_NAME_ORDER = ['min quality', 'max quality', 'Real World']
 
 
 def compute_zoom(all_data):
     middle = np.median(all_data)
     abs_diff = np.abs(all_data - middle)
-    all_data = all_data[abs_diff < 100 * np.median(abs_diff)]  # Remove ridiculous outliers
+    avg_diff = np.median(abs_diff)
+    if avg_diff == 0:
+        avg_diff = np.mean(abs_diff)
+    all_data = all_data[abs_diff < 100 * avg_diff]  # Remove ridiculous outliers
     middle = np.mean(all_data)
     std = np.std(all_data)
     return np.max((np.min(all_data), middle - 3 * std)), np.min((np.max(all_data), middle + 3 * std))
@@ -751,7 +755,7 @@ def create_distribution_plots(system_name: str, group_name: str, errors_by_quali
         # First, from all the data, find the bounds of the graph
         all_data = np.concatenate(tuple(get_error(errors) for errors in errors_by_quality.values()))
         all_data = all_data[~np.isnan(all_data)]
-        if len(all_data) <= 0: # No data available for this graph, skip it
+        if len(all_data) <= 0:  # No data available for this graph, skip it
             continue
         zoom_min, zoom_max = compute_zoom(all_data)
         del all_data
@@ -764,11 +768,11 @@ def create_distribution_plots(system_name: str, group_name: str, errors_by_quali
 
         show = False
         figure, ax = pyplot.subplots(1, 1, figsize=(12, 10), dpi=80)
-        for quality_name, errors in errors_by_quality.items():
+        for quality_name in QUALITY_NAME_ORDER:
             if quality_name == 'Real World':
                 error = rw_error
             else:
-                error = get_error(errors)
+                error = get_error(errors_by_quality[quality_name])
                 error = error[~np.isnan(error)]
 
             middle_error = error[(error > zoom_min) * (error < zoom_max)]
