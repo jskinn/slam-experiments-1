@@ -19,6 +19,7 @@ import arvet.simulation.unrealcv.unrealcv_simulator as uecv_sim
 import data_helpers
 import trajectory_group as tg
 import estimate_errors_benchmark
+import estimate_trial_errors_benchmark
 import frame_errors_benchmark
 
 
@@ -87,6 +88,11 @@ class BaseGeneratedPredictRealWorldExperiment(arvet.batch_analysis.experiment.Ex
         self.import_benchmark(
             name='Frame Errors',
             benchmark=frame_errors_benchmark.FrameErrorsBenchmark(),
+            db_client=db_client
+        )
+        self.import_benchmark(
+            name='Trial Errors',
+            benchmark=estimate_trial_errors_benchmark.EstimateTrialErrorsBenchmark(),
             db_client=db_client
         )
 
@@ -234,6 +240,67 @@ class BaseGeneratedPredictRealWorldExperiment(arvet.batch_analysis.experiment.Ex
     def get_quality_variations(self) -> typing.List[typing.Tuple[str, dict]]:
         return []
 
+    def analyse_ks_score(self, system_name: str, output_folder: str,
+                         db_client: arvet.database.client.DatabaseClient, results_cache: dict):
+        from scipy.stats import ks_2samp
+
+        if system_name not in self.systems:
+            logging.getLogger(__name__).info("Cannot find system \"{0}\"".format(system_name))
+            return
+        system_id = self.systems[system_name]
+        os.makedirs(output_folder, exist_ok=True)
+
+        # First, collect all the real world errors
+        all_rw_errors = {}
+        for group_name, trajectory_group in self.trajectory_groups.items():
+            result_id = self.get_benchmark_result(system_id, trajectory_group.reference_dataset,
+                                                  self.benchmarks['Estimate Errors'])
+            if result_id is None:
+                continue
+            all_rw_errors[group_name] = collect_all_behaviour({result_id}, db_client, results_cache)
+
+        # For each trajectory\
+        for group_name in sorted(all_rw_errors.keys()):
+            trajectory_group = self.trajectory_groups[group_name]
+            print('  ')
+            print(group_name + ':')
+
+            # First, collect the virtual data errors aggregated by quality
+            errors_by_quality = {}
+            for quality_map in trajectory_group.generated_datasets.values():
+                for quality_name, dataset_id in quality_map.items():
+                    result_id = self.get_benchmark_result(system_id, dataset_id, self.benchmarks['Estimate Errors'])
+                    if result_id is not None:
+                        errors = collect_all_behaviour({result_id}, db_client, results_cache)
+
+                        quality_name = quality_name.lower()
+                        if quality_name not in errors_by_quality:
+                            errors_by_quality[quality_name] = errors
+                        else:
+                            errors_by_quality[quality_name] = np.vstack((errors_by_quality[quality_name], errors))
+
+            # For each error, measure ks similarity between
+            for get_error, error_name, units, is_integer, bounds in [
+                (lambda errs: errs[:, 3], 'translation error', 'm', False, (0, None)),
+                (lambda errs: errs[:, 5], 'orientation error', 'radians', False, (0, np.pi)),
+                (lambda errs: errs[:, 9], 'translation consistency', 'm', False, (0, None)),
+                (lambda errs: errs[:, 11], 'orientation consistency', 'rad', False, (0, np.pi)),
+                (lambda errs: errs[:, 14], 'feature matches', None, True, (0, None))
+            ]:
+                print('  {0}:'.format(error_name))
+                sequence_errors = get_error(all_rw_errors[group_name])
+                for quality_name in sorted(errors_by_quality.keys()):
+                    errors = get_error(errors_by_quality[quality_name])
+                    ks_stat, ks_pval = ks_2samp(sequence_errors, errors)
+                    print('    {0}: {1}, pval: {2}'.format(quality_name, ks_stat, ks_pval))
+                for other_group_name in sorted(all_rw_errors.keys()):
+                    if other_group_name != group_name:
+                        errors = get_error(all_rw_errors[other_group_name])
+                        ks_stat, ks_pval = ks_2samp(sequence_errors, errors)
+                        print('    {0}: {1}, pval: {2}'.format(other_group_name, ks_stat, ks_pval))
+
+
+
     def analyse_distributions(self, system_name: str, output_folder: str,
                               db_client: arvet.database.client.DatabaseClient, results_cache: dict):
         if system_name not in self.systems:
@@ -273,12 +340,12 @@ class BaseGeneratedPredictRealWorldExperiment(arvet.batch_analysis.experiment.Ex
             errors_by_quality=all_errors_by_quality,
             output_folder=output_folder
         )
-        create_tracking_plot(
-            system_name=system_name,
-            group_name='all data',
-            errors_by_quality=all_errors_by_quality,
-            output_folder=output_folder,
-        )
+        # create_tracking_plot(
+        #     system_name=system_name,
+        #     group_name='all data',
+        #     errors_by_quality=all_errors_by_quality,
+        #     output_folder=output_folder,
+        # )
 
     def analyse_validation_groups(self, system_name: str, validation_sets: typing.Iterable[typing.Set[str]],
                                   output_folder: str, db_client: arvet.database.client.DatabaseClient,
@@ -708,10 +775,15 @@ def predict_classification(data, target_data) -> typing.List[typing.Tuple[float,
 
 QUALITY_NAME_COLOURS = {
     'real world': (0, 0, 0),
-    'max quality': (255 / 255, 64 / 255, 0 / 255),
-    'min quality': (0, 0 / 255, 255 / 255),
+    'max quality': (255 / 255, 128 / 255, 0 / 255),
+    'min quality': (0, 0 / 255, 128 / 255),
 }
-QUALITY_NAME_ORDER = ['min quality', 'max quality', 'Real World']
+QUALITY_NAME_ORDER = ['Real World', 'min quality', 'max quality']
+QUALITY_NAME_ALPHA = {
+    'min quality': 0.5,
+    'max quality': 0.3,
+    'real world': 1
+}
 
 
 def compute_zoom(all_data):
@@ -735,16 +807,16 @@ def create_distribution_plots(system_name: str, group_name: str, errors_by_quali
         # (lambda errs: errs[:, 0], 'forward accuracy', 'm', (None, None)),
         # (lambda errs: errs[:, 1], 'sideways accuracy', 'm', (None, None)),
         # (lambda errs: errs[:, 2], 'vertical accuracy', 'm', (None, None)),
-        (lambda errs: errs[:, 3], 'translational accuracy', 'm', False, (0, None)),
+        (lambda errs: errs[:, 3], 'translation error', 'm', False, (0, None)),
         # (lambda errs: 1 / (1 + errs[:, 3]), 'inverse translational accuracy', 'm', (0, 1)),
-        (lambda errs: errs[:, 5], 'rotational accuracy', 'radians', False, (0, np.pi)),
+        (lambda errs: errs[:, 5], 'orientation error', 'radians', False, (0, np.pi)),
         # (lambda errs: errs[:, 6], 'forward precision', 'm', (None, None)),
         # (lambda errs: errs[:, 7], 'sideways precision', 'm', (None, None)),
         # (lambda errs: errs[:, 8], 'vertical precision', 'm', (None, None)),
-        (lambda errs: errs[:, 9], 'translational precision', 'm', False, (0, None)),
+        (lambda errs: errs[:, 9], 'translation consistency', 'm', False, (0, None)),
         # (lambda errs: 1 / (1 + errs[:, 9]), 'inverse translational precision', 'm', (0, 1)),
-        (lambda errs: errs[:, 11], 'rotational precision', 'rad', False, (0, np.pi)),
-        (lambda errs: errs[:, 13], 'feature count', None, True, (0, None)),
+        (lambda errs: errs[:, 11], 'orientation consistency', 'rad', False, (0, np.pi)),
+        # (lambda errs: errs[:, 13], 'feature count', None, True, (0, None)),
         (lambda errs: errs[:, 14], 'feature matches', None, True, (0, None))
     ]:
         title = "{0} on {1} {2} distribution".format(system_name, group_name, error_name)
@@ -764,10 +836,12 @@ def create_distribution_plots(system_name: str, group_name: str, errors_by_quali
             zoom_min = max(zoom_min, bounds[0])
         if bounds[1] is not None:
             zoom_max = min(zoom_max, bounds[1])
-        bins = min(int(zoom_max - zoom_min), 1000) if is_integer else 1000
+        bins = 500
+        if is_integer and int(zoom_max) - int(zoom_min) < bins - 1:
+            bins = list(range(int(zoom_min), int(zoom_max) + 1, 1))
 
         show = False
-        figure, ax = pyplot.subplots(1, 1, figsize=(12, 10), dpi=80)
+        figure, ax = pyplot.subplots(1, 1, figsize=(8, 4), dpi=80)
         for quality_name in QUALITY_NAME_ORDER:
             if quality_name == 'Real World':
                 error = rw_error
@@ -792,7 +866,7 @@ def create_distribution_plots(system_name: str, group_name: str, errors_by_quali
                     label=label,
                     density=True,
                     bins=bins,
-                    alpha=0.5,
+                    alpha=QUALITY_NAME_ALPHA[quality_name.lower()],
                     color=QUALITY_NAME_COLOURS[quality_name.lower()]
                 )
         if show:
@@ -805,10 +879,10 @@ def create_distribution_plots(system_name: str, group_name: str, errors_by_quali
             ax.set_ylabel('frequency')
             ax.legend()
 
-            figure.suptitle(title)
+            #figure.suptitle(title)
             pyplot.tight_layout()
             pyplot.subplots_adjust(top=0.95, right=0.99)
-            figure.savefig(os.path.join(output_folder, title.replace(' ', '_') + '.png'))
+            #figure.savefig(os.path.join(output_folder, title.replace(' ', '_') + '.png'))
             figure.savefig(os.path.join(output_folder, title.replace(' ', '_') + '.svg'))
             pyplot.close(figure)
 
@@ -820,6 +894,7 @@ def create_tracking_plot(system_name: str, group_name: str, errors_by_quality: t
     scores = []
     for quality_name, errors in errors_by_quality.items():
         error = errors[:, 12]
+        error = error[~np.isnan(error)]
         if len(error) > 0:
             score = np.sum(error) / len(error)
             scores.append((score, quality_name))

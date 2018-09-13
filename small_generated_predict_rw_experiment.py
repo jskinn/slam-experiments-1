@@ -2,7 +2,11 @@
 import os.path
 import typing
 import numpy as np
+import cv2
 
+import arvet.util.image_utils as imutils
+import arvet.util.associate as assoc
+import arvet.util.database_helpers as dbhelp
 import arvet.database.client
 import arvet.config.path_manager
 import arvet.metadata.image_metadata as imeta
@@ -202,12 +206,47 @@ class SmallGeneratedPredictRealWorldExperiment(bgprwe.BaseGeneratedPredictRealWo
                     'TUM rgbd_dataset_frieburg2_rpy', 'TUM rgbd_dataset_frieburg2_xyz',
                     'TUM rgbd_dataset_frieburg3_structure_texture_far', 'TUM rgbd_dataset_frieburg3_walking_xyz']
 
-        # --------- DISTRIBUTIONS -----------
-        # Plot the distributions for the different errors
+        # --------- EXAMPLE IMAGES ---------
+        # img_index = 0
+        # img_folder = os.path.join(type(self).get_output_folder(), 'example images')
+        # os.makedirs(img_folder, exist_ok=True)
+        # #traj_group = self.trajectory_groups['EuRoC MH_05_difficult']
+        # for traj_group in self.trajectory_groups.values():
+        #     for sim_name, quality_map in traj_group.generated_datasets.items():
+        #         if 'min quality' in quality_map and 'max quality' in quality_map:
+        #             min_quality = dbhelp.load_object(db_client, db_client.image_source_collection,
+        #                                              quality_map['min quality'])
+        #             max_quality = dbhelp.load_object(db_client, db_client.image_source_collection,
+        #                                              quality_map['max quality'])
+        #             matches = assoc.associate(
+        #                 {t: True for t in min_quality.timestamps},
+        #                 {t: True for t in max_quality.timestamps},
+        #                 offset=0, max_difference=0.1
+        #             )
+        #             if len(matches) > 0:
+        #                 for match_idx in range(0, len(matches), len(matches) // 4):
+        #                     match = matches[match_idx]
+        #                     cv2.imwrite(os.path.join(img_folder, "min_quality_{0}.png".format(img_index)),
+        #                                 min_quality[match[0]].data[:,:,::-1])
+        #                     cv2.imwrite(os.path.join(img_folder, "max_quality_{0}.png".format(img_index)),
+        #                                 max_quality[match[1]].data[:,:,::-1])
+        #                     img_index += 1
+
+        # --------- KS Score comparison -----------
         for system_name in self.systems.keys():
-            self.analyse_distributions(
+            self.analyse_ks_score(
                 system_name=system_name,
-                output_folder=os.path.join(type(self).get_output_folder(), system_name, 'distributions'),
+                output_folder=os.path.join(type(self).get_output_folder(), system_name, 'ks_table'),
                 db_client=db_client,
                 results_cache=results_cache
             )
+
+        # --------- DISTRIBUTIONS -----------
+        # Plot the distributions for the different errors
+        # for system_name in self.systems.keys():
+        #     self.analyse_distributions(
+        #         system_name=system_name,
+        #         output_folder=os.path.join(type(self).get_output_folder(), system_name, 'distributions'),
+        #         db_client=db_client,
+        #         results_cache=results_cache
+        #     )
