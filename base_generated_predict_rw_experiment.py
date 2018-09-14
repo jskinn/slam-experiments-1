@@ -3,6 +3,7 @@ import logging
 import typing
 import bson
 import os.path
+import json
 import numpy as np
 
 import arvet.util.database_helpers as dh
@@ -241,7 +242,7 @@ class BaseGeneratedPredictRealWorldExperiment(arvet.batch_analysis.experiment.Ex
         return []
 
     def analyse_ks_score(self, system_name: str, output_folder: str,
-                         db_client: arvet.database.client.DatabaseClient, results_cache: dict):
+                                 db_client: arvet.database.client.DatabaseClient, results_cache: dict):
         from scipy.stats import ks_2samp
 
         if system_name not in self.systems:
@@ -250,56 +251,105 @@ class BaseGeneratedPredictRealWorldExperiment(arvet.batch_analysis.experiment.Ex
         system_id = self.systems[system_name]
         os.makedirs(output_folder, exist_ok=True)
 
-        # First, collect all the real world errors
-        all_rw_errors = {}
-        for group_name, trajectory_group in self.trajectory_groups.items():
+        # Preload results
+        result_ids = set()
+        for trajectory_group in self.trajectory_groups.values():
             result_id = self.get_benchmark_result(system_id, trajectory_group.reference_dataset,
-                                                  self.benchmarks['Estimate Errors'])
-            if result_id is None:
-                continue
-            all_rw_errors[group_name] = collect_all_behaviour({result_id}, db_client, results_cache)
+                                                  self.benchmarks['Trial Errors'])
+            if result_id is not None:
+                result_ids.add(result_id)
 
-        # For each trajectory\
-        for group_name in sorted(all_rw_errors.keys()):
-            trajectory_group = self.trajectory_groups[group_name]
-            print('  ')
-            print(group_name + ':')
+                for quality_map in trajectory_group.generated_datasets.values():
+                    for quality_name, dataset_id in quality_map.items():
+                        result_id = self.get_benchmark_result(system_id, dataset_id, self.benchmarks['Trial Errors'])
+                        if result_id is not None:
+                            result_ids.add(result_id)
+        results = dh.load_many_objects(db_client, db_client.results_collection, result_ids - set(results_cache.keys()))
+        for result in results:
+            results_cache[result.identifier] = result
 
-            # First, collect the virtual data errors aggregated by quality
-            errors_by_quality = {}
-            for quality_map in trajectory_group.generated_datasets.values():
-                for quality_name, dataset_id in quality_map.items():
-                    result_id = self.get_benchmark_result(system_id, dataset_id, self.benchmarks['Estimate Errors'])
-                    if result_id is not None:
-                        errors = collect_all_behaviour({result_id}, db_client, results_cache)
+        lines = []
+        json_data = {}
+        # For each error, measure ks similarity between
+        for get_error, error_name, units, is_integer, bounds in [
+            (lambda errs: np.array(errs)[:, 3], 'translation error', 'm', False, (0, None)),
+            (lambda errs: np.array(errs)[:, 5], 'orientation error', 'radians', False, (0, np.pi)),
+            #(lambda errs: np.array(errs)[:, 9], 'translation consistency', 'm', False, (0, None)),
+            #(lambda errs: np.array(errs)[:, 11], 'orientation consistency', 'rad', False, (0, np.pi)),
+            #(lambda errs: np.array(errs)[:, 14], 'feature matches', None, True, (0, None))
+        ]:
+            print(error_name + ':')
+            lines.append(error_name + ':')
+            json_data[error_name] = {}
 
-                        quality_name = quality_name.lower()
-                        if quality_name not in errors_by_quality:
-                            errors_by_quality[quality_name] = errors
-                        else:
-                            errors_by_quality[quality_name] = np.vstack((errors_by_quality[quality_name], errors))
+            # For each trajectory group
+            for trajectory_group in self.trajectory_groups.values():
+                print('  {0}:'.format(trajectory_group.name))
+                lines.append('  {0}:'.format(trajectory_group.name))
+                json_data[error_name][trajectory_group.name] = {}
 
-            # For each error, measure ks similarity between
-            for get_error, error_name, units, is_integer, bounds in [
-                (lambda errs: errs[:, 3], 'translation error', 'm', False, (0, None)),
-                (lambda errs: errs[:, 5], 'orientation error', 'radians', False, (0, np.pi)),
-                (lambda errs: errs[:, 9], 'translation consistency', 'm', False, (0, None)),
-                (lambda errs: errs[:, 11], 'orientation consistency', 'rad', False, (0, np.pi)),
-                (lambda errs: errs[:, 14], 'feature matches', None, True, (0, None))
-            ]:
-                print('  {0}:'.format(error_name))
-                sequence_errors = get_error(all_rw_errors[group_name])
-                for quality_name in sorted(errors_by_quality.keys()):
-                    errors = get_error(errors_by_quality[quality_name])
-                    ks_stat, ks_pval = ks_2samp(sequence_errors, errors)
-                    print('    {0}: {1}, pval: {2}'.format(quality_name, ks_stat, ks_pval))
-                for other_group_name in sorted(all_rw_errors.keys()):
-                    if other_group_name != group_name:
-                        errors = get_error(all_rw_errors[other_group_name])
-                        ks_stat, ks_pval = ks_2samp(sequence_errors, errors)
-                        print('    {0}: {1}, pval: {2}'.format(other_group_name, ks_stat, ks_pval))
+                result_id = self.get_benchmark_result(system_id, trajectory_group.reference_dataset,
+                                                      self.benchmarks['Trial Errors'])
+                all_rw_errors = []
+                inter_run_scores = []
+                if result_id is not None and result_id in results_cache:
+                    result = results_cache[result_id]
+                    trial_ids = sorted(result.errors_by_trial.keys())
+                    for i in range(len(trial_ids) - 1):
+                        rw_error = get_error(result.errors_by_trial[trial_ids[i]])
+                        all_rw_errors.append(rw_error)
+                        for j in range(i + 1, len(trial_ids)):
+                            ks_stat, _ = ks_2samp(
+                                rw_error,
+                                get_error(result.errors_by_trial[trial_ids[j]])
+                            )
+                            inter_run_scores.append(ks_stat)
+                    print('    between runs: {0}'.format(sorted(inter_run_scores)))
+                    lines.append('    between runs: {0}'.format(sorted(inter_run_scores)))
+                    json_data[error_name][trajectory_group.name]['self'] = inter_run_scores
 
+                other_rw_scores = []
+                if len(all_rw_errors) > 0:
+                    for other_trajectory_group in self.trajectory_groups.values():
+                        if other_trajectory_group.name != trajectory_group.name:
+                            result_id = self.get_benchmark_result(system_id, other_trajectory_group.reference_dataset,
+                                                                  self.benchmarks['Trial Errors'])
+                            if result_id is not None and result_id in results_cache:
+                                result = results_cache[result_id]
+                                for other_rw_errors in result.errors_by_trial.values():
+                                    for rw_error in all_rw_errors:
+                                        ks_stat, _ = ks_2samp(
+                                            rw_error,
+                                            get_error(other_rw_errors)
+                                        )
+                                        other_rw_scores.append(ks_stat)
+                    print('    other real world: {0}'.format(sorted(other_rw_scores)))
+                    lines.append('    other real world: {0}'.format(sorted(other_rw_scores)))
+                    json_data[error_name][trajectory_group.name]['other real'] = other_rw_scores
 
+                scores_by_quality = {}
+                for quality_map in trajectory_group.generated_datasets.values():
+                    for quality_name, dataset_id in quality_map.items():
+                        result_id = self.get_benchmark_result(system_id, dataset_id, self.benchmarks['Trial Errors'])
+                        if result_id is not None and result_id in results_cache:
+                            result = results_cache[result_id]
+                            if quality_name not in scores_by_quality:
+                                scores_by_quality[quality_name] = []
+                            for sim_errors in result.errors_by_trial.values():
+                                for rw_error in all_rw_errors:
+                                    ks_stat, _ = ks_2samp(
+                                        rw_error,
+                                        get_error(sim_errors)
+                                    )
+                                    scores_by_quality[quality_name].append(ks_stat)
+                for quality_name, scores in scores_by_quality.items():
+                    print('    {0}: {1}'.format(quality_name, sorted(scores)))
+                    lines.append('    {0}: {1}'.format(quality_name, sorted(scores)))
+                    json_data[error_name][trajectory_group.name][quality_name] = scores
+        with open(os.path.join(output_folder, 'self_to_sim.txt'), 'w') as fp:
+            fp.write('\n'.join(lines))
+        with open(os.path.join(output_folder, 'self_to_sim.json'), 'w') as fp:
+            json.dump(json_data, fp)
 
     def analyse_distributions(self, system_name: str, output_folder: str,
                               db_client: arvet.database.client.DatabaseClient, results_cache: dict):

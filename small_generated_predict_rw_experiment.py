@@ -131,13 +131,13 @@ class SmallGeneratedPredictRealWorldExperiment(bgprwe.BaseGeneratedPredictRealWo
         # Import TUM datasets with lists of trajectory start points for each simulator
         for folder, mappings in [
             ('rgbd_dataset_freiburg1_360', tum_origins.get_frieburg1_360()),
-            ('rgbd_dataset_frieburg1_rpy', tum_origins.get_frieburg1_rpy()),
-            ('rgbd_dataset_frieburg1_xyz', tum_origins.get_frieburg1_xyz()),
-            ('rgbd_dataset_frieburg2_desk', tum_origins.get_frieburg2_desk()),
-            ('rgbd_dataset_frieburg2_rpy', tum_origins.get_frieburg2_rpy()),
-            ('rgbd_dataset_frieburg2_xyz', tum_origins.get_frieburg2_xyz()),
-            ('rgbd_dataset_frieburg3_structure_texture_far', tum_origins.get_frieburg3_structure_texture_far()),
-            ('rgbd_dataset_frieburg3_walking_xyz', tum_origins.get_frieburg3_walking_xyz())
+            ('rgbd_dataset_freiburg1_rpy', tum_origins.get_frieburg1_rpy()),
+            ('rgbd_dataset_freiburg1_xyz', tum_origins.get_frieburg1_xyz()),
+            ('rgbd_dataset_freiburg2_desk', tum_origins.get_frieburg2_desk()),
+            ('rgbd_dataset_freiburg2_rpy', tum_origins.get_frieburg2_rpy()),
+            ('rgbd_dataset_freiburg2_xyz', tum_origins.get_frieburg2_xyz()),
+            ('rgbd_dataset_freiburg3_structure_texture_far', tum_origins.get_frieburg3_structure_texture_far()),
+            ('rgbd_dataset_freiburg3_walking_xyz', tum_origins.get_frieburg3_walking_xyz())
         ]:
             self.import_dataset(
                 module_name='arvet_slam.dataset.tum.tum_loader',

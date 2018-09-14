@@ -54,11 +54,20 @@ class EstimateTrialErrorsBenchmark(arvet.core.benchmark.Benchmark):
                 reason=invalid_reason
             )
 
-        # First, we need to find the average computed trajectory, so we can estimate noise
+        # Collect together the computed trajectories and normalise as necessary
+        computed_motions_by_trial = {}
+        for trial_result in trial_results:
+            if trial_result.has_scale:
+                computed_motions = trial_result.get_computed_camera_motions()
+            else:
+                gt_scale = th.find_trajectory_scale(trial_result.get_ground_truth_camera_poses())
+                computed_motions = th.trajectory_to_motion_sequence(
+                    th.rescale_trajectory(trial_result.get_computed_camera_poses(), gt_scale))
+            computed_motions_by_trial[trial_result.identifier] = computed_motions
+
+        # we need to find the average computed trajectory, so we can estimate noise
         if len(trial_results) > 1:
-            mean_computed_motions = th.compute_average_trajectory([
-                trial_result.get_computed_camera_motions() for trial_result in trial_results
-            ])
+            mean_computed_motions = th.compute_average_trajectory(list(computed_motions_by_trial.values()))
         else:
             # We don't want to estimate noise for a single trajectory, in that case it should always be NaN
             mean_computed_motions = {}
@@ -67,7 +76,7 @@ class EstimateTrialErrorsBenchmark(arvet.core.benchmark.Benchmark):
         estimate_errors = {}
         for trial_result in trial_results:
             ground_truth_motions = trial_result.get_ground_truth_motions()
-            computed_motions = trial_result.get_computed_camera_motions()
+            computed_motions = computed_motions_by_trial[trial_result.identifier]
             tracking_statistics = trial_result.get_tracking_states()
             num_features = trial_result.num_features
             num_matches = trial_result.num_matches
@@ -233,7 +242,7 @@ class EstimateTrialErrorsResult(arvet.core.benchmark.BenchmarkResult):
     """
 
     def __init__(self, benchmark_id: bson.ObjectId, trial_result_ids: typing.Iterable[bson.ObjectId],
-                 estimate_errors: typing.Iterable[typing.Iterable[float]],
+                 estimate_errors: typing.Mapping[bson.ObjectId, typing.Iterable[typing.Iterable[float]]],
                  id_: bson.ObjectId = None, **kwargs):
         """
 
@@ -247,7 +256,7 @@ class EstimateTrialErrorsResult(arvet.core.benchmark.BenchmarkResult):
         """
         kwargs['success'] = True
         super().__init__(benchmark_id=benchmark_id, trial_result_ids=trial_result_ids, id_=id_, **kwargs)
-        self._errors_observations = np.asarray(estimate_errors)
+        self._errors_observations = estimate_errors
 
     @property
     def errors_by_trial(self) -> np.ndarray:
