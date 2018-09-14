@@ -182,12 +182,15 @@ def get_error_from_motion(motion: tf.Transform, gt_motion: tf.Transform, avg_mot
     # Error
     trans_error = motion.location - gt_motion.location
     trans_error_length = np.linalg.norm(trans_error)
-    trans_error_direction = np.arccos(
-        min(1.0, max(-1.0, np.dot(
-            trans_error / trans_error_length,
-            gt_motion.location / np.linalg.norm(gt_motion.location)))
-            )
-    ) if trans_error_length > 0 else 0  # No error direction when there is no error
+    if trans_error_length != 0:
+        trans_error_direction = np.arccos(
+            min(1.0, max(-1.0, np.dot(
+                trans_error / trans_error_length,
+                gt_motion.location / np.linalg.norm(gt_motion.location)))
+                )
+        )
+    else:
+        trans_error_direction = 0
     rot_error = tf.quat_diff(motion.rotation_quat(w_first=True), gt_motion.rotation_quat(w_first=True))
 
     # Noise
@@ -211,12 +214,15 @@ def get_error_from_motion(motion: tf.Transform, gt_motion: tf.Transform, avg_mot
     else:
         trans_noise = motion.location - avg_motion.location
         trans_noise_length = np.linalg.norm(trans_noise)
-        trans_noise_direction = np.arccos(
-            min(1.0, max(-1.0, np.dot(
-                trans_noise / trans_noise_length,
-                gt_motion.location / np.linalg.norm(gt_motion.location)))
-                )
-        ) if trans_noise_length > 0 else 0  # No noise direction for 0 noise
+        if trans_noise_length != 0:
+            trans_noise_direction = np.arccos(
+                min(1.0, max(-1.0, np.dot(
+                    trans_noise / trans_noise_length,
+                    gt_motion.location / np.linalg.norm(gt_motion.location)))
+                    )
+            )
+        else:
+            trans_noise_direction = 0
         rot_noise = tf.quat_diff(motion.rotation_quat(w_first=True), avg_motion.rotation_quat(w_first=True))
 
         return (
@@ -259,17 +265,16 @@ class EstimateTrialErrorsResult(arvet.core.benchmark.BenchmarkResult):
         self._errors_observations = estimate_errors
 
     @property
-    def errors_by_trial(self) -> np.ndarray:
+    def errors_by_trial(self) -> typing.Mapping[bson.ObjectId, typing.Iterable[typing.Iterable[float]]]:
         return self._errors_observations
 
     def serialize(self):
         output = super().serialize()
-        output['estimate_errors'] = bson.Binary(pickle.dumps(self._errors_observations.tolist(),
-                                                             protocol=pickle.HIGHEST_PROTOCOL))
+        output['estimate_errors'] = self._errors_observations
         return output
 
     @classmethod
     def deserialize(cls, serialized_representation, db_client, **kwargs):
         if 'estimate_errors' in serialized_representation:
-            kwargs['estimate_errors'] = pickle.loads(serialized_representation['estimate_errors'])
+            kwargs['estimate_errors'] = serialized_representation['estimate_errors']
         return super().deserialize(serialized_representation, db_client, **kwargs)
