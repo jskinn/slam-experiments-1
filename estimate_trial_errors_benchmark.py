@@ -270,7 +270,7 @@ class EstimateTrialErrorsResult(arvet.core.benchmark.BenchmarkResult):
 
     def serialize(self):
         output = super().serialize()
-        output['estimate_errors'] = {str(trial_id): errors for trial_id, errors in self._errors_observations}
+        output['estimate_errors'] = {str(trial_id): errors for trial_id, errors in self._errors_observations.items()}
         return output
 
     @classmethod
@@ -278,6 +278,6 @@ class EstimateTrialErrorsResult(arvet.core.benchmark.BenchmarkResult):
         if 'estimate_errors' in serialized_representation:
             kwargs['estimate_errors'] = {
                 bson.ObjectId(trial_id): errors
-                for trial_id, errors in serialized_representation['estimate_errors']
+                for trial_id, errors in serialized_representation['estimate_errors'].items()
             }
         return super().deserialize(serialized_representation, db_client, **kwargs)
