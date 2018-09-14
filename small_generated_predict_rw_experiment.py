@@ -233,7 +233,7 @@ class SmallGeneratedPredictRealWorldExperiment(bgprwe.BaseGeneratedPredictRealWo
         #                     img_index += 1
 
         # --------- KS Score comparison -----------
-        for system_name in self.systems.keys():
+        for system_name in set(self.systems.keys()) - {'ORBSLAM2 rgbd'}:
             self.analyse_ks_score(
                 system_name=system_name,
                 output_folder=os.path.join(type(self).get_output_folder(), system_name, 'ks_table'),
