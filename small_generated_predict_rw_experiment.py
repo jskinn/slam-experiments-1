@@ -237,6 +237,7 @@ class SmallGeneratedPredictRealWorldExperiment(bgprwe.BaseGeneratedPredictRealWo
             self.analyse_ks_score(
                 system_name=system_name,
                 output_folder=os.path.join(type(self).get_output_folder(), system_name, 'ks_table'),
+                dataset_names=set(euroc_sets),
                 db_client=db_client,
                 results_cache=results_cache
             )

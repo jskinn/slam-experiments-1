@@ -241,8 +241,8 @@ class BaseGeneratedPredictRealWorldExperiment(arvet.batch_analysis.experiment.Ex
     def get_quality_variations(self) -> typing.List[typing.Tuple[str, dict]]:
         return []
 
-    def analyse_ks_score(self, system_name: str, output_folder: str,
-                                 db_client: arvet.database.client.DatabaseClient, results_cache: dict):
+    def analyse_ks_score(self, system_name: str, output_folder: str, dataset_names: typing.Set[str],
+                         db_client: arvet.database.client.DatabaseClient, results_cache: dict):
         from scipy.stats import ks_2samp
 
         if system_name not in self.systems:
@@ -254,6 +254,8 @@ class BaseGeneratedPredictRealWorldExperiment(arvet.batch_analysis.experiment.Ex
         # Preload results
         result_ids = set()
         for trajectory_group in self.trajectory_groups.values():
+            if trajectory_group.name not in dataset_names:
+                continue
             result_id = self.get_benchmark_result(system_id, trajectory_group.reference_dataset,
                                                   self.benchmarks['Trial Errors'])
             if result_id is not None:
@@ -269,6 +271,7 @@ class BaseGeneratedPredictRealWorldExperiment(arvet.batch_analysis.experiment.Ex
             results_cache[result.identifier] = result
 
         lines = []
+        rw_to_rw_cache = {}
         json_data = {}
         # For each error, measure ks similarity between
         for get_error, error_name, units, is_integer, bounds in [
@@ -284,20 +287,23 @@ class BaseGeneratedPredictRealWorldExperiment(arvet.batch_analysis.experiment.Ex
 
             # For each trajectory group
             for trajectory_group in self.trajectory_groups.values():
+                if trajectory_group.name not in dataset_names:
+                    continue
+
                 print('  {0}:'.format(trajectory_group.name))
                 lines.append('  {0}:'.format(trajectory_group.name))
                 json_data[error_name][trajectory_group.name] = {}
 
                 result_id = self.get_benchmark_result(system_id, trajectory_group.reference_dataset,
                                                       self.benchmarks['Trial Errors'])
-                all_rw_errors = []
+                all_rw_errors = {}
                 inter_run_scores = []
                 if result_id is not None and result_id in results_cache:
                     result = results_cache[result_id]
                     trial_ids = sorted(result.errors_by_trial.keys())
                     for i in range(len(trial_ids) - 1):
                         rw_error = get_error(result.errors_by_trial[trial_ids[i]])
-                        all_rw_errors.append(rw_error)
+                        all_rw_errors[trial_ids[i]] = (rw_error)
                         for j in range(i + 1, len(trial_ids)):
                             ks_stat, _ = ks_2samp(
                                 rw_error,
@@ -311,17 +317,34 @@ class BaseGeneratedPredictRealWorldExperiment(arvet.batch_analysis.experiment.Ex
                 other_rw_scores = []
                 if len(all_rw_errors) > 0:
                     for other_trajectory_group in self.trajectory_groups.values():
-                        if other_trajectory_group.name != trajectory_group.name:
+                        if other_trajectory_group.name != trajectory_group.name and \
+                                other_trajectory_group.name in dataset_names:
                             result_id = self.get_benchmark_result(system_id, other_trajectory_group.reference_dataset,
                                                                   self.benchmarks['Trial Errors'])
                             if result_id is not None and result_id in results_cache:
                                 result = results_cache[result_id]
-                                for other_rw_errors in result.errors_by_trial.values():
-                                    for rw_error in all_rw_errors:
-                                        ks_stat, _ = ks_2samp(
-                                            rw_error,
-                                            get_error(other_rw_errors)
-                                        )
+                                for other_trial_id, other_rw_errors in result.errors_by_trial.items():
+                                    for rw_trial_id, rw_error in all_rw_errors.items():
+                                        if other_trial_id in rw_to_rw_cache and \
+                                                rw_trial_id in rw_to_rw_cache[other_trial_id]:
+                                            ks_stat = rw_to_rw_cache[other_trial_id][rw_trial_id]
+                                        elif rw_trial_id in rw_to_rw_cache and \
+                                                other_trial_id in rw_to_rw_cache[rw_trial_id]:
+                                            ks_stat = rw_to_rw_cache[rw_trial_id][other_trial_id]
+                                        else:
+                                            ks_stat, _ = ks_2samp(
+                                                rw_error,
+                                                get_error(other_rw_errors)
+                                            )
+                                            if other_trial_id not in rw_to_rw_cache:
+                                                rw_to_rw_cache[other_trial_id] = {}
+                                            if rw_trial_id not in rw_to_rw_cache:
+                                                rw_to_rw_cache[rw_trial_id] = {}
+                                            if other_trial_id not in rw_to_rw_cache[rw_trial_id]:
+                                                rw_to_rw_cache[rw_trial_id][other_trial_id] = ks_stat
+                                            if rw_trial_id not in rw_to_rw_cache[other_trial_id]:
+                                                rw_to_rw_cache[other_trial_id][rw_trial_id] = ks_stat
+
                                         other_rw_scores.append(ks_stat)
                     print('    other real world: {0}'.format(sorted(other_rw_scores)))
                     lines.append('    other real world: {0}'.format(sorted(other_rw_scores)))
@@ -336,7 +359,7 @@ class BaseGeneratedPredictRealWorldExperiment(arvet.batch_analysis.experiment.Ex
                             if quality_name not in scores_by_quality:
                                 scores_by_quality[quality_name] = []
                             for sim_errors in result.errors_by_trial.values():
-                                for rw_error in all_rw_errors:
+                                for rw_error in all_rw_errors.values():
                                     ks_stat, _ = ks_2samp(
                                         rw_error,
                                         get_error(sim_errors)
